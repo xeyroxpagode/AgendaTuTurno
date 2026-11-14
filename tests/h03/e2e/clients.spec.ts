@@ -2,12 +2,14 @@ import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { cleanupContext, createOwnerContext } from "../../h01/e2e/helpers";
 import postgres from "postgres";
+import dotenv from "dotenv";
+
+// Load environment variables
+dotenv.config({ path: "../../../../.env" });
 
 let ctx: Awaited<ReturnType<typeof createOwnerContext>>;
 let db: ReturnType<typeof postgres>;
 let businessId: string;
-
-test.setTimeout(90_000);
 
 test.beforeAll(async () => {
   ctx = await createOwnerContext();
@@ -38,6 +40,7 @@ async function login(page: import("@playwright/test").Page) {
 }
 
 test("H03.U01 E2E Owner: leer cliente en listado y abrir detalle", async ({ page }) => {
+  test.setTimeout(90_000);
   await login(page);
 
   // Navegar a Clientes
@@ -54,6 +57,7 @@ test("H03.U01 E2E Owner: leer cliente en listado y abrir detalle", async ({ page
 });
 
 test("H03.U01 E2E Barbero no accede a Clientes", async ({ page }) => {
+  test.setTimeout(90_000);
   // Crear un barbero en el mismo negocio
   const barberEmail = `barber-e2e-${randomUUID().slice(0, 6)}@example.com`;
   const barberPassword = "YoungKingz-E2E!26";

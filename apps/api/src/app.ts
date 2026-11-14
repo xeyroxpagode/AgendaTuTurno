@@ -16,15 +16,20 @@ import { registerProfessionalRoutes } from "./modules/professionals/routes.js";
 import { registerScheduleRoutes } from "./modules/schedules/routes.js";
 import { registerStaffServicesRoutes } from "./modules/staff-services/routes.js";
 import { registerClientsRoutes } from "./modules/clients/routes.js";
+import { registerClientAuthRoutes } from "./modules/client-auth/routes.js";
+import { registerAvailabilityRoutes } from "./modules/availability/routes.js";
+import { registerBookingRoutes } from "./modules/booking/routes.js";
+import { registerAbsenceRoutes } from "./modules/absence/routes.js";
+import { registerAttendanceRoutes } from "./modules/attendance/routes.js";
 import "./plugins/auth.js";
 
 const uuidParam = z.object({ id: z.string().uuid() });
 const operationParam = z.object({ operationId: z.string().uuid() });
 
 export async function buildApp(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: { redact: ["req.headers.authorization", "req.headers.cookie", "body.token", "body.password"] }, trustProxy: true });
-  await app.register(cors, { origin: runtime.webOrigin, credentials: true, methods: ["GET","HEAD","POST","PATCH","PUT","OPTIONS"], allowedHeaders: ["authorization","content-type","x-operation-id"] });
-  await app.register(swagger, { openapi: { info: { title: "YoungKingZ API", version: "2.2.1", description: "Authoritative IAM, Staff, Catalog, Professional Profiles, and Weekly Schedules API" }, servers: [{ url: "http://127.0.0.1:4100" }], tags: [{name:"system"},{name:"iam"},{name:"team"},{name:"catalog"},{name:"professionals"},{name:"schedules"},{name:"staff-services"},{name:"clients"}] } });
+  const app = Fastify({ logger: { redact: ["req.headers.authorization", "req.headers.cookie", "req.headers.x-guest-token", "req.headers.x-intent-proof", "req.body.token", "req.body.password", "req.body.currentPassword", "req.body.newPassword", "req.body.recoveryCode", "req.body.code", "req.body.intentProof", "body.token", "body.password"] }, trustProxy: true });
+  await app.register(cors, { origin: (origin, cb) => { const allowlist = runtime.corsAllowlist; if (!origin || allowlist.includes(origin)) { cb(null, true); } else { cb(new Error("CORS policy"), false); } }, credentials: true, methods: ["GET","HEAD","POST","PATCH","PUT","DELETE","OPTIONS"], allowedHeaders: ["authorization","content-type","x-operation-id","x-intent-proof","x-guest-token"] });
+  await app.register(swagger, { openapi: { info: { title: "YoungKingZ API", version: "2.5.0", description: "Authoritative IAM, Staff, Catalog, CRM, Client Identity, Availability, Booking, Absence and Attendance API" }, servers: [{ url: "http://127.0.0.1:4100" }], tags: [{name:"system"},{name:"iam"},{name:"team"},{name:"catalog"},{name:"professionals"},{name:"schedules"},{name:"staff-services"},{name:"clients"},{name:"client-auth"},{name:"availability"},{name:"booking"},{name:"absence"},{name:"attendance"}] } });
   await app.register(swaggerUi, { routePrefix: "/docs" });
 
   app.setErrorHandler((error, _request, reply) => {
@@ -99,5 +104,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerScheduleRoutes(app);
   await registerStaffServicesRoutes(app);
   await registerClientsRoutes(app);
+  await registerClientAuthRoutes(app);
+  await registerAvailabilityRoutes(app);
+  await registerBookingRoutes(app);
+  await registerAbsenceRoutes(app);
+  await registerAttendanceRoutes(app);
   return app;
 }

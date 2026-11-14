@@ -1,5 +1,5 @@
 import type { FastifyRequest } from "fastify";
-import { DomainError, roleCapabilities, type Capability, type RoleCode } from "@youngkingz/contracts";
+import { DomainError, roleCapabilities, grantableCapabilitiesByRole, type Capability, type RoleCode } from "@youngkingz/contracts";
 import { one, rows, sql } from "../../lib/sql.js";
 import { database, supabaseAdmin } from "../../lib/runtime.js";
 
@@ -71,7 +71,19 @@ export class AuthorizationService {
     });
     const selected = assignments.find((item) => item.id === session?.active_role_assignment_id) ?? assignments[0]!;
     const grants = await rows<{ capability: Capability }>(sql`select capability from iam.capability_grants where role_assignment_id = ${selected.id} and revoked_at is null and valid_from <= now() and (expires_at is null or expires_at > now())`);
-    const capabilities = new Set<Capability>([...roleCapabilities[selected.role], ...grants.map((grant) => grant.capability)]);
+    // H03.U06 · WP-05 · compatibilidad rol <-> capability (U05-CORR-IAM-01).
+    // Un grant sólo es EFECTIVO si la capability es compatible con el rol que
+    // la recibe: pertenece a su conjunto base o está explícitamente delegable a
+    // ese rol. Sin esta comprobación, un BARBER con un grant `bookings.read`
+    // leía la agenda compartida de otros profesionales (CN-06).
+    const baseline = roleCapabilities[selected.role];
+    const grantable = grantableCapabilitiesByRole[selected.role];
+    const capabilities = new Set<Capability>([
+      ...baseline,
+      ...grants
+        .filter((grant) => baseline.includes(grant.capability) || grantable.includes(grant.capability))
+        .map((grant) => grant.capability)
+    ]);
     await databaseTouch(session.id);
     return { accountId: identity.account_id, personId: identity.person_id, businessId: identity.business_id, staffMemberId: identity.staff_member_id, accessSessionId: session.id, roleAssignmentId: selected.id, role: selected.role, contextRevision: Number(session.context_revision), capabilities, email: data.user.email };
   }

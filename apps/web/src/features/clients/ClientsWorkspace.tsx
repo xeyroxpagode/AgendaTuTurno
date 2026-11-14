@@ -275,6 +275,7 @@ export function ClientsWorkspace() {
             <h1 className="page-title">{profile.name}</h1>
           </div>
         </header>
+        {message && <div className="notice success" role="status">{message}</div>}
         <section className="stack">
           <h2>Ficha de cliente</h2>
           <dl className="detail-grid">
@@ -287,7 +288,7 @@ export function ClientsWorkspace() {
             <dt>Modificada</dt><dd>{new Date(profile.updatedAt).toLocaleDateString()}</dd>
           </dl>
           <div className="inline">
-            <Button onClick={() => setView("edit")} disabled={busy}>Editar datos</Button>
+            <Button onClick={openEdit} disabled={busy}>Editar datos</Button>
             <Button className="ghost" onClick={() => { setView("list"); }}>Volver al listado</Button>
           </div>
         </section>

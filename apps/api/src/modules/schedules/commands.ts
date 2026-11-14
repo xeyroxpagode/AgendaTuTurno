@@ -3,6 +3,7 @@ import type { Actor } from "../iam/authorization.js";
 import { audit, executeOperation, type Tx } from "../system/operations.js";
 import { canonicalizeWeek, emptyWeek, weekIsEmpty, weeklySchedulesEqual, type CanonicalInterval, type CanonicalWeek } from "./domain.js";
 import { intervalsToCanonicalWeek, toStaffScheduleResponse, type IntervalRow } from "./mapper.js";
+import { lockAvailabilityGuard } from "../availability/guard.js";
 
 type ScheduleRow = { id: string; revision: number | string };
 type StaffEmployment = "ONBOARDING" | "ACTIVE" | "INACTIVE";
@@ -28,6 +29,8 @@ export async function replaceWeeklySchedule(actor: Actor, staffMemberId: string,
   return executeOperation(
     { operationId, command: "schedules.weekly.replace", actor, payload: { staffMemberId, expectedRevision: input.expectedRevision, week: canonical } },
     async (tx) => {
+      // H03.U03 lock order: Business guard precedes every Staff/H02 aggregate lock.
+      await lockAvailabilityGuard(tx, actor.businessId);
       // 4. lock StaffMember (serialize concurrent writes and offboard) / 5. tenant
       const staff = await tx`select id, employment_status::text "employmentStatus" from team.staff_members where business_id = ${actor.businessId} and id = ${staffMemberId} for update`;
       if (!staff.length) throw new DomainError("NOT_FOUND", "Staff member not found", 404);
@@ -42,6 +45,11 @@ export async function replaceWeeklySchedule(actor: Actor, staffMemberId: string,
 
       const existingRows = (schedule.length ? (await tx`select weekday, start_minute "startMinute", end_minute "endMinute" from team.staff_schedule_intervals where business_id = ${actor.businessId} and weekly_schedule_id = ${schedule[0]!.id} order by weekday, start_minute`) : []) as unknown as IntervalRow[];
       const existingWeek = intervalsToCanonicalWeek(existingRows);
+
+      if (!weeklySchedulesEqual(existingWeek, canonical)) {
+        const conflicts = await tx`select id from availability.resource_allocations where business_id=${actor.businessId} and staff_member_id=${staffMemberId} and status='ACTIVE' and occupied_end_at>now() limit 100`;
+        if (conflicts.length) throw new DomainError("AVAILABILITY_IMPACT_CONFLICT", "Weekly Schedule change would affect future commitments", 409, { allocationIds: conflicts.map(item => item.id) });
+      }
 
       let nextRevision: number;
       let hasSchedule: boolean;

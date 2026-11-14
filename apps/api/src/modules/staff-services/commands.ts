@@ -2,6 +2,7 @@ import { DomainError, replaceStaffServicesSchema } from "@youngkingz/contracts";
 import type { Actor } from "../iam/authorization.js";
 import { audit, executeOperation, type Tx } from "../system/operations.js";
 import { canonicalizeServiceIds, diffSets } from "./domain.js";
+import { lockAvailabilityGuard } from "../availability/guard.js";
 
 type ServiceRow = { id: string; lifecycle: "ACTIVE" | "ARCHIVED" };
 
@@ -63,6 +64,9 @@ export async function replaceStaffServices(actor: Actor, staffMemberId: string, 
   return executeOperation(
     { operationId, command: "staff.services.replace", actor, payload: { staffMemberId, expectedRevision, serviceIds: target } },
     async (tx) => {
+      // H03.U03: guard before StaffMember/StaffServiceSet locks prevents an
+      // eligibility change from racing an Allocation claim.
+      await lockAvailabilityGuard(tx, actor.businessId);
       // 5. Lock StaffMember first, per lock order U04 §44.
       await lockStaffMember(tx, actor, staffMemberId);
 
@@ -82,6 +86,11 @@ export async function replaceStaffServices(actor: Actor, staffMemberId: string, 
       // 14. Semantic no-op: no writes, no revision bump, no audit (U04 §51).
       if (added.length === 0 && removed.length === 0) {
         return { staffMemberId, revision: currentRevision, changed: false, serviceIds: currentServiceIds };
+      }
+
+      if (removed.length) {
+        const conflicts = await tx`select distinct a.id from availability.resource_allocations a join availability.allocation_service_requirements r on r.business_id=a.business_id and r.allocation_id=a.id where a.business_id=${actor.businessId} and a.staff_member_id=${staffMemberId} and a.status='ACTIVE' and a.occupied_end_at>now() and r.service_id=any(${removed}::uuid[]) limit 100`;
+        if (conflicts.length) throw new DomainError("AVAILABILITY_IMPACT_CONFLICT", "Removing these Services would affect future commitments", 409, { allocationIds: conflicts.map(item => item.id) });
       }
 
       // 11. Fetch+lock required Service rows in stable order (ORDER BY id).
