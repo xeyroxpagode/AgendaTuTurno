@@ -11,6 +11,7 @@ export * from "./availability.js";
 export * from "./booking.js";
 export * from "./absence.js";
 export * from "./attendance.js";
+export * from "./inventory.js";
 
 export const clientsSchema = pgSchema("clients");
 

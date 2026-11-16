@@ -65,6 +65,10 @@ test("H02.U03 corrective: member permissions use a human Administrar horarios to
   await createStaff("RECEPTIONIST", "reception");
   await login(page, ctx.email, /\/team/);
   // Select the reception member to open its detail, then land on its schedule permissions.
+  // The existing mobile workspace opens the first member automatically.
+  await expect(page.locator(".staff-row",{hasText:"reception U03"})).toBeAttached();
+  const backToTeam=page.getByRole("button",{name:"Volver al equipo",exact:true});
+  if(await backToTeam.isVisible())await backToTeam.click();
   await page.locator(".staff-row", { hasText: "reception U03" }).click();
   await expect(page.getByLabel("Administrar horarios")).toHaveCount(1);
   await expect(page.getByLabel("Administrar horarios")).not.toBeChecked();

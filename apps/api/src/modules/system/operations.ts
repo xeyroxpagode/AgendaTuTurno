@@ -37,6 +37,8 @@ export async function executePrincipalOperation<T>(input: { operationId: string;
   const requestHash = stableHash({ command: input.command, payload: input.payload });
   const identity = principalIdentity(input.principal);
   const result = await database.client.begin(async (tx) => {
+    // Serialize the first insert too: SELECT FOR UPDATE cannot lock a missing row.
+    await tx`select pg_advisory_xact_lock(hashtextextended(${input.operationId}, 104))`;
     const existing = await tx`select request_hash, status::text status, response_body, business_id, actor_account_id, principal_kind, principal_ref from system.operation_attempts where operation_id = ${input.operationId} for update`;
     if (existing.length) {
       const row = existing[0]!;

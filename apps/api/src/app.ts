@@ -21,6 +21,7 @@ import { registerAvailabilityRoutes } from "./modules/availability/routes.js";
 import { registerBookingRoutes } from "./modules/booking/routes.js";
 import { registerAbsenceRoutes } from "./modules/absence/routes.js";
 import { registerAttendanceRoutes } from "./modules/attendance/routes.js";
+import { registerInventoryRoutes } from "./modules/inventory/routes.js";
 import "./plugins/auth.js";
 
 const uuidParam = z.object({ id: z.string().uuid() });
@@ -109,5 +110,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerBookingRoutes(app);
   await registerAbsenceRoutes(app);
   await registerAttendanceRoutes(app);
+  await registerInventoryRoutes(app);
   return app;
 }

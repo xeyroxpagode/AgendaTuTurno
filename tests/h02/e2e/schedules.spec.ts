@@ -91,6 +91,9 @@ test("H02.U03 editor blocks overlapping blocks before saving", async ({ page }) 
 test("H02.U03 team list shows a daily schedule summary per member", async ({ page }) => {
   await login(page);
   const row = page.locator(".staff-row", { hasText: "Barbero Horario" });
+  await expect(row).toBeAttached();
+  const backToTeam=page.getByRole("button",{name:"Volver al equipo",exact:true});
+  if(await backToTeam.isVisible())await backToTeam.click();
   await expect(row).toBeVisible();
   await expect(row.locator(".schedule-today")).toBeVisible();
 });

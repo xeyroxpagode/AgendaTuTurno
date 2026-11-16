@@ -28,6 +28,9 @@
 .schedule-skeleton{height:520px}
 .week-editor{display:grid;gap:18px}
 .week-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+.week-toolbar>.inline{flex-wrap:wrap;max-width:100%}
+.week-grid,.day-block{min-width:0}
+.interval-row{flex-wrap:wrap}
 .check-row.compact{gap:6px}
 .check-row.compact input{width:16px;height:16px}
 .week-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}

@@ -9,6 +9,7 @@ export * from "@youngkingz/contracts/availability";
 export * from "@youngkingz/contracts/booking";
 export * from "@youngkingz/contracts/absence";
 export * from "@youngkingz/contracts/attendance";
+export * from "@youngkingz/contracts/inventory";
 
 export const roles = ["OWNER", "RECEPTIONIST", "BARBER"] as const;
 export const roleSchema = z.enum(roles);
@@ -58,7 +59,8 @@ export const capabilities = [
   // Registro desde reserva o walk-in, estados terminales, historial y
   // corrección trazable. `attendance.read.all` es el alcance de Business
   // completo; `attendance.read` es el alcance propio del profesional.
-  "attendance.register", "attendance.read", "attendance.read.all", "attendance.correct"
+  "attendance.register", "attendance.read", "attendance.read.all", "attendance.correct",
+  "inventory.read", "inventory.manage", "inventory.consume", "inventory.operate", "inventory.adjust", "inventory.cost.read"
 ] as const;
 export const capabilitySchema = z.enum(capabilities);
 export type Capability = z.infer<typeof capabilitySchema>;
@@ -71,7 +73,7 @@ export const delegableCapabilities: readonly Capability[] = [
   "professionals.create", "professionals.update", "professionals.lifecycle",
   "schedules.manage"
   ,"availability.manage", "availability.impacts.read"
-  ,"bookings.read", "bookings.history.read"
+  ,"bookings.read", "bookings.history.read", "inventory.manage", "inventory.adjust", "inventory.cost.read"
 ];
 
 /**
@@ -146,7 +148,8 @@ export const roleCapabilities: Readonly<Record<RoleCode, readonly Capability[]>>
     // CAP-03-07 · Ausencias y conflictos (ámbito Business).
     "absence.request", "absence.read", "absence.approve", "absence.reject", "absence.withdraw", "absence.apply",
     // CAP-03-08 · Prestación real (ámbito Business).
-    "attendance.register", "attendance.read", "attendance.read.all", "attendance.correct"],
+    "attendance.register", "attendance.read", "attendance.read.all", "attendance.correct",
+    "inventory.read", "inventory.operate", "inventory.consume"],
   // BARBER · agenda propia y acciones explícitamente autorizadas sobre su ámbito:
   // lee únicamente sus propias reservas (`bookings.self.read`, sin
   // `bookings.read`), y registra llegada / no-show sólo sobre reservas
@@ -159,5 +162,5 @@ export const roleCapabilities: Readonly<Record<RoleCode, readonly Capability[]>>
     // CAP-03-07 · Ausencias: sólo las propias (el alcance se resuelve en servidor).
     "absence.request", "absence.read", "absence.withdraw",
     // CAP-03-08 · Prestación real: sólo la propia (el alcance se resuelve en servidor).
-    "attendance.register", "attendance.read", "attendance.correct"]
+    "attendance.register", "attendance.read", "attendance.correct", "inventory.read", "inventory.consume"]
 };

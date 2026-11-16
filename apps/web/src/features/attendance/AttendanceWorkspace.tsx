@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 
 import { useCallback, useEffect, useState } from "react";
 import { Button, EmptyState, StatusPill } from "@youngkingz/ui";
@@ -260,6 +261,7 @@ export function AttendanceWorkspace() {
             <div className="inline">
               {detail.attendance.walkIn && <StatusPill tone="warning">Sin turno</StatusPill>}
               <StatusPill tone={statusTone(detail.attendance.status)}>{statusLabel(detail.attendance.status)}</StatusPill>
+              {can("inventory.consume")&&detail.attendance.status!=="IN_PROGRESS"&&<Link className="button" href={`${role==='BARBER'?'/insumos':'/inventario'}?attendance=${detail.attendance.id}&professional=${detail.attendance.attendedByStaffMemberId}`}>Registrar consumo real</Link>}
               <Button className="ghost" onClick={() => setDetail(null)} aria-label="Cerrar detalle">Cerrar</Button>
             </div>
           </header>

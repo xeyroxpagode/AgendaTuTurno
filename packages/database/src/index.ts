@@ -4,6 +4,7 @@ import { getTableConfig } from "drizzle-orm/pg-core";
 import * as schema from "./schema.js";
 import { reservations } from "./booking.js";
 import { staffEffectiveUnavailability } from "./availability.js";
+import { inventoryItems,inventoryLocations,inventoryLocationAccess,inventoryMovements,inventoryEntries,inventoryPositions,inventoryConsumptions,inventoryCounts,inventoryAdjustments,inventoryMinimums,inventoryCommitments } from "./inventory.js";
 
 export function createDatabase(connectionString: string) {
   const client = postgres(connectionString, { max: 10, prepare: false });
@@ -17,6 +18,12 @@ export * from "./availability.js";
 export * from "./booking.js";
 export * from "./absence.js";
 export * from "./attendance.js";
+export * from "./inventory.js";
+export function inventorySchemaSummary(){
+  return [inventoryItems,inventoryLocations,inventoryLocationAccess,inventoryMovements,inventoryEntries,inventoryPositions,inventoryConsumptions,inventoryCounts,inventoryAdjustments,inventoryMinimums,inventoryCommitments].map(table=>{
+    const c=getTableConfig(table);return {name:c.name,columns:c.columns.map(column=>({name:column.name,notNull:column.notNull,type:column.getSQLType()}))};
+  });
+}
 
 /**
  * Texto plano de una expresión SQL de Drizzle.

@@ -1,0 +1,13 @@
+import { api } from "@/lib/api/client";
+export type StockItem={id:string;sku:string;name:string;description:string;category:string;use:'SALE'|'INTERNAL'|'MIXED';unit:string;parentId:string|null;active:boolean;published:boolean;priceMinor:number|null;costMinor:number|null;imageUrl:string|null;revision:number;minimum:number|null;physical:number;committed:number;sellable:number;salePhysical:number;internalPhysical:number;shortage:number;criticality:string};
+export type StockLocation={id:string;name:string;staffMemberId:string|null;professionalName:string|null;active:boolean;revision:number};
+export type StockPosition={sku:string;locationId:string;purpose:'SALE'|'INTERNAL';physical:number;committed:number;sellable:number;version:number;minimum:number|null;criticality:string};
+export type StockCount={id:string;sku:string;locationId:string;purpose:'SALE'|'INTERNAL';observed:number;referenceQuantity:number;referenceVersion:number;observedAt:string;reason:string;adjusted:boolean;currentVersion:number;currentPhysical:number;previousCountId:string|null};
+export type InventorySnapshot={items:StockItem[];locations:StockLocation[];positions:StockPosition[];counts:StockCount[];professionals:{id:string;name:string}[]};
+export type StockMovement={id:string;kind:string;reason:string;effectiveAt:string;createdAt:string;operationId:string;sourceReference:string|null;correctsId:string|null;discrepancy:boolean;corrected:boolean;actorName:string;attendanceId:string|null;usedByStaffMemberId:string|null;entries:{sku:string;locationId:string;purpose:string;delta:number;version:number}[]};
+export type MovementPage={items:StockMovement[];nextCursor:string|null};
+export const loadInventory=()=>api<InventorySnapshot>('/v1/inventory');
+export const loadMovements=(sku?:string,before?:string)=>api<MovementPage>(`/v1/inventory/movements?limit=30${sku?`&sku=${encodeURIComponent(sku)}`:''}${before?`&before=${before}`:''}`);
+export type PendingInventoryOperation={id:string;path:string;method:string;body:unknown};
+export const mutateInventory=(op:PendingInventoryOperation)=>api<{data:Record<string,unknown>;replayed:boolean}>(op.path,{method:op.method,body:JSON.stringify(op.body),operationId:op.id});
+export const operationStatus=(id:string)=>api<{status:string;responseBody:Record<string,unknown>;responseStatus:number;errorCode:string|null}>(`/v1/inventory/operations/${id}`);
