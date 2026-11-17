@@ -35,6 +35,25 @@ QA y lo eliminó en `afterAll`. No existe código de fault injection en
 - `artifacts/h05/acceptance/{mobile-390,small-410,desktop-1440}-reception-caja.png`
 - `artifacts/h05/acceptance/*-s33-real.png`
 
+## Cierre focalizado F08 / F14 / F46
+
+| # | Comando | Resultado | Base |
+|---|---|---|---|
+| 13 | `pnpm exec vitest run tests/h05/integration/f08-cash-idempotency.spec.ts` | 2 passed | `youngkingz_h05_qa_20261116` |
+| 14 | `pnpm exec vitest run tests/h05/integration/f14-mixed-payment.spec.ts` | 2 passed | `youngkingz_h05_qa_20261116` |
+| 15 | `pnpm exec vitest run tests/h05/integration/f46-closure.spec.ts` | 7 passed | `youngkingz_h05_qa_20261116` |
+| 16 | `pnpm exec vitest run tests/h05` (tras el cierre) | **99 passed / 0 failed** (16 archivos) | `youngkingz_h05_qa_20261116` |
+| 17 | `pnpm -r --if-present typecheck` / `pnpm lint` | PASS | — |
+| 18 | `pnpm exec vitest run tests/h01 tests/h02 tests/h03 tests/h04` | **400 passed / 0 failed** | `youngkingz_h04_qa_20261115` |
+
+Verificación de limpieza QA: `to_regclass('qa_faults.sentinel') = null` y
+0 disparadores `qa_fault_*` residuales tras la ejecución 15. No se ejecutaron
+E2E adicionales porque no se modificó código productivo ni contrato HTTP.
+
+Evidencia nueva: `artifacts/h05/acceptance/external-terminal-simulation.json`
+(resultado de la terminal simulada, con `simulator` explícitamente marcado como
+QA y separado de PostgreSQL).
+
 ## Nota sobre la ejecución `pnpm exec vitest run` global
 
 Ejecutar la suite completa con `DATABASE_URL` de H04 produce 12 fallos

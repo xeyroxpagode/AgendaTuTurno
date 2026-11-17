@@ -1,6 +1,15 @@
 # H05 — INFORME FINAL DE ACEPTACIÓN (pasada correctiva)
 
-## A. Estado
+## A. Estado (tras el cierre focalizado F08/F14/F46)
+
+**`H05 — READY FOR B FINAL ACCEPTANCE`**
+
+El cierre focalizado se ejecutó en una sola pasada: F08 → F14 → F46 →
+regresiones → expediente. Las tres brechas eran `TEST_INCOMPLETE`; no se
+confirmó ningún defecto de producto y no fue necesario modificar código
+productivo. Actor B conserva la autoridad de aceptación final.
+
+### Estado anterior (histórico, no reescrito)
 
 **`H05 — READY FOR B ACCEPTANCE`**
 
@@ -34,7 +43,7 @@ Detalle con causa raíz, evidencia y reejecución en `FINDINGS_REGISTER.md`.
 
 | Suite | Resultado |
 |---|---|
-| H05 unit + integration | **88/88 PASS** |
+| H05 unit + integration (tras el cierre) | **99/99 PASS** |
 | H05 E2E navegador (3 viewports) | **33/33 PASS** |
 | Regresiones H01–H04 | **400/400 PASS** |
 | Typecheck / Lint / Build | PASS |
@@ -54,6 +63,18 @@ En particular:
 - F37: 1 positivo con operador sin `inventory.operate` + 6 negativas ejecutadas.
 - F46: inyección de fallo antes del commit con rollback completo + 3 carreras.
 - F12: evidencia obligatoria, default UNKNOWN, PAN/CVV rechazados.
+
+### Cierre focalizado (nueva ejecución, historial anterior preservado)
+
+| F-ID | Brecha | Nueva prueba | Evidencia persistida | Resultado |
+|---|---|---|---|---|
+| F08 | Sólo se contaban `money_operations`; falta contenido/causalidad del CashMovement y negativa | `f08-cash-idempotency.spec.ts` (2) | 1 MoneyOperation, 1 `SALE_CASH` de 6.000 con actor/sesión/caja/operation_id, 1 allocation, saldo +6.000 una vez; payload distinto → `IDEMPOTENCY_CONFLICT` sin efectos | `PASS_VERIFIED` |
+| F14 | Escala confundida (3.000 minor = $30) y no se demostraba en UNA operación que sólo el efectivo tocaba caja | `f14-mixed-payment.spec.ts` (2) | 300.000 + 200.000 + 100.000 minor; total 600.000; 3 componentes con evidencia; **1 CashMovement de 300.000**; saldo +300.000; replay idempotente; UNKNOWN no acreditado | `PASS_VERIFIED` |
+| F46 | La entrega fallida usaba cobro CASH; faltaba pago externo confirmado no atómico | `f46-closure.spec.ts` (7) | 5 fallos locales con rollback; simulador QA con `confirmedAt` inalterado; dinero SUCCEEDED + incidencia `DELIVERY_PENDING` sin movimiento; recuperación sobre el mismo intento; 1 money/1 allocation/1 delivery y stock 1 | `PASS_VERIFIED` |
+
+Los 46 F-ID permanecen `PASS_VERIFIED`; F08, F14 y F46 ahora cuentan con
+ejecución adicional e independiente que demuestra exactamente la brecha
+señalada por Actor B.
 
 ## F. Navegador
 

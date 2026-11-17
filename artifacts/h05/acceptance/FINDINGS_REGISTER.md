@@ -17,6 +17,17 @@
 | NEW-02 | **MAJOR** | Contrato API/UX | `/v1/cash/sessions` devolvía `id` pero el frontend esperaba `cashSessionId`; el selector de caja quedaba vacío y el checkout con efectivo fallaba desde la UI de Receptionist | `roles-and-s33.spec.ts` timeout en selectOption | Alias `s.id "cashSessionId"` en `cash/queries.ts` | 33/33 E2E | CERRADO |
 | NEW-03 | **MAJOR** | UX S33 | El botón "Consultar intento original" cambiaba la vista sin actualizar la URL; al recargar se perdía S33 | `roles-and-s33.spec.ts` refresh | `router.push('/cobro-incierto')` junto al `sessionStorage` y al cambio de vista | 33/33 E2E | CERRADO |
 
+## Cierre focalizado F08 / F14 / F46 ( Actor B )
+
+| ID | F-ID | Clasificación | Brecha | Acción | Resultado |
+|---|---|---|---|---|---|
+| CLOSE-01 | F08 | `TEST_INCOMPLETE` | La prueba anterior contaba `money_operations` pero no verificaba contenido/causalidad del `CashMovement`, saldo de caja ni negativa con payload distinto | Nueva prueba `f08-cash-idempotency.spec.ts` con consultas independientes de 4 tablas y aserción de `IDEMPOTENCY_CONFLICT` sin efectos | 2/2 PASS — sin defecto de producto |
+| CLOSE-02 | F14 | `TEST_INCOMPLETE` | El test anterior medía 3 componentes de 3.000/2.000/1.000 **unidades menores** ($30/$20/$10), no el fixture de $3.000 efectivo, y no demostraba en UNA operación que sólo el efectivo tocaba caja | Nueva prueba `f14-mixed-payment.spec.ts`: 300.000 + 200.000 + 100.000 minor, evidencia externa, assertion de 1 CashMovement de 300.000 y saldo +300.000; segundo test con tarjeta UNKNOWN | 2/2 PASS — sin defecto de producto |
+| CLOSE-03 | F46 | `TEST_INCOMPLETE` | El escenario anterior de entrega fallida usaba cobro CASH; faltaba un pago externo confirmado e incidencia recuperable sobre el mismo intento | Nueva prueba `f46-closure.spec.ts` con 5 puntos de fallo local, simulador QA de terminal, incidencia y recuperación; triggers QA eliminados en `afterAll` | 7/7 PASS — sin defecto de producto |
+
+No se modificó código productivo durante este cierre: las tres brechas eran de
+evidencia, no de comportamiento. No se debilitó ninguna aserción previa.
+
 ## Severidades residuales
 
-NINGUNO abierto. No hubo BLOCKED: las diez condiciones del informe inicial y tres defectos nuevos se reprodujeron, corrigieron y reejecutaron dentro del alcance congelado.
+NINGUNO abierto. No hubo BLOCKED: las diez condiciones del informe inicial, tres defectos nuevos de la pasada anterior y tres brechas de evidencia del cierre focalizado quedaron resueltas y reejecutadas dentro del alcance congelado.
