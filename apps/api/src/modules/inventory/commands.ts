@@ -152,14 +152,22 @@ export async function consume(actor:Actor,body:unknown,operationId:string){
 }
 export async function correctMovement(actor:Actor,id:string,body:unknown,operationId:string){
   const v=inventoryCorrectionSchema.parse(body);
-  return inventoryOperation(actor,operationId,"movement.correct","inventory.adjust",{id,...v},async tx=>{
-    const [m]=await tx`select * from inventory.movements where business_id=${actor.businessId} and id=${id}`;if(!m)throw missing();
-    if(m.kind==='DELIVERY')throw conflict("La entrega se corrige mediante el contrato causal del dominio propietario");
-    if((await tx`select 1 from inventory.movements where corrects_id=${id}`).length)throw conflict("Ese movimiento ya tiene una corrección");
-    const rows=await tx`select sku,location_id,purpose,delta from inventory.entries where movement_id=${id}`;
-    const lines=rows.map(r=>({sku:String(r.sku),locationId:String(r.location_id),purpose:r.purpose as StockPurpose,delta:-Number(r.delta)}));
-    return physicalEvent(tx,actor,operationId,'CORRECTION',lines,v.reason,new Date().toISOString(),{correctsId:id,allowNegative:true});
-  });
+  return inventoryOperation(actor,operationId,"movement.correct","inventory.adjust",{id,...v},async tx=>performMovementCorrection(tx,actor,id,v.reason,operationId));
+}
+
+/**
+ * Corrección física de un movimiento. Se expone por separado para que el
+ * módulo de correcciones de H05 pueda registrar la corrección y el
+ * movimiento inverso dentro de la MISMA transacción, sin abrir un segundo
+ * intento con el mismo `operation_id`.
+ */
+export async function performMovementCorrection(tx:Tx,actor:Actor,id:string,reason:string,operationId:string){
+  const [m]=await tx`select * from inventory.movements where business_id=${actor.businessId} and id=${id}`;if(!m)throw missing();
+  if(m.kind==='DELIVERY')throw conflict("La entrega se corrige mediante el contrato causal del dominio propietario");
+  if((await tx`select 1 from inventory.movements where corrects_id=${id}`).length)throw conflict("Ese movimiento ya tiene una corrección");
+  const rows=await tx`select sku,location_id,purpose,delta from inventory.entries where movement_id=${id}`;
+  const lines=rows.map(r=>({sku:String(r.sku),locationId:String(r.location_id),purpose:r.purpose as StockPurpose,delta:-Number(r.delta)}));
+  return physicalEvent(tx,actor,operationId,'CORRECTION',lines,reason,new Date().toISOString(),{correctsId:id,allowNegative:true});
 }
 export async function createCount(actor:Actor,body:unknown,operationId:string){
   const v=inventoryCountSchema.parse(body);

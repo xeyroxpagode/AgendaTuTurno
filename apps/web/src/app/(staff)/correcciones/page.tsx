@@ -1,0 +1,3 @@
+﻿import { FinanceWorkspace } from "@/features/finance/FinanceWorkspace";
+export default function Page() { return <FinanceWorkspace initialView="CORRECCIONES" />; }
+

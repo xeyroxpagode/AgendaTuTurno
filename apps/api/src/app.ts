@@ -22,6 +22,12 @@ import { registerBookingRoutes } from "./modules/booking/routes.js";
 import { registerAbsenceRoutes } from "./modules/absence/routes.js";
 import { registerAttendanceRoutes } from "./modules/attendance/routes.js";
 import { registerInventoryRoutes } from "./modules/inventory/routes.js";
+import { registerSalesRoutes } from "./modules/sales/routes.js";
+import { registerMoneyRoutes } from "./modules/money/routes.js";
+import { registerCashRoutes } from "./modules/cash/routes.js";
+import { registerObligationsRoutes } from "./modules/obligations/routes.js";
+import { registerCheckoutRoutes } from "./modules/checkout/routes.js";
+import { registerCorrectionsRoutes } from "./modules/corrections/routes.js";
 import "./plugins/auth.js";
 
 const uuidParam = z.object({ id: z.string().uuid() });
@@ -111,5 +117,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerAbsenceRoutes(app);
   await registerAttendanceRoutes(app);
   await registerInventoryRoutes(app);
+  await registerSalesRoutes(app);
+  await registerMoneyRoutes(app);
+  await registerCashRoutes(app);
+  await registerObligationsRoutes(app);
+  await registerCheckoutRoutes(app);
+  await registerCorrectionsRoutes(app);
   return app;
 }

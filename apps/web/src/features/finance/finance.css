@@ -1,0 +1,53 @@
+/* H05 · superficies financieras. Reutiliza el sistema visual del monorepo
+   (variables y tokens definidos en globals.css) sin introducir un tema nuevo. */
+
+.finance { display: flex; flex-direction: column; gap: 1.25rem; padding: clamp(1rem, 3vw, 2rem); max-width: 1180px; margin: 0 auto; }
+.finance-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.finance-header h1 { margin: 0; font-size: clamp(1.5rem, 3vw, 2rem); }
+.finance-header p { margin: .25rem 0 0; color: var(--muted, #64748b); }
+.finance-role { border: 1px solid var(--border, #cbd5e1); border-radius: 999px; padding: .3rem .75rem; font-size: .8rem; }
+
+.finance-tabs { display: flex; gap: .35rem; overflow-x: auto; padding-bottom: .3rem; scrollbar-width: thin; }
+.finance-tabs button { flex: 0 0 auto; border: 1px solid var(--border, #cbd5e1); background: transparent; color: inherit; border-radius: 999px; padding: .5rem .9rem; cursor: pointer; font: inherit; }
+.finance-tabs button.active { background: var(--accent, #0f172a); color: var(--accent-contrast, #fff); border-color: var(--accent, #0f172a); }
+.finance-tabs button:focus-visible, .finance button:focus-visible { outline: 2px solid var(--focus, #2563eb); outline-offset: 2px; }
+
+.finance-status { min-height: 1.5rem; display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; font-size: .9rem; }
+.finance-status.success { color: #86efac; }
+.finance-status.error { color: #fca5a5; }
+.finance-status.unknown { color: #fcd34d; }
+.finance-status button { border: 1px solid currentColor; background: transparent; border-radius: .5rem; padding: .25rem .6rem; cursor: pointer; color: inherit; }
+
+.finance-panel { display: flex; flex-direction: column; gap: 1rem; }
+.finance-panel h2 { margin: 0; font-size: 1.2rem; }
+.finance-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .75rem; align-items: end; border: 1px solid var(--border, #e2e8f0); border-radius: .9rem; padding: .9rem; }
+.finance-form label { display: flex; flex-direction: column; gap: .3rem; font-size: .82rem; }
+.finance-form label.check { flex-direction: row; align-items: center; }
+.finance-form input, .finance-form select { border: 1px solid var(--border, #cbd5e1); border-radius: .5rem; padding: .5rem .6rem; font: inherit; background: var(--surface, #fff); color: inherit; min-width: 0; }
+.finance-form button, .finance-card button { border: 0; border-radius: .5rem; padding: .55rem .9rem; background: var(--accent, #0f172a); color: var(--accent-contrast, #fff); cursor: pointer; font: inherit; }
+.finance-card button.danger { background: #b91c1c; }
+
+.finance-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: .9rem; }
+.finance-card { border: 1px solid var(--border, #e2e8f0); border-radius: .9rem; padding: 1rem; display: flex; flex-direction: column; gap: .7rem; min-width: 0; }
+.finance-card header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.finance-card dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: .5rem; margin: 0; }
+.finance-card dl div { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.finance-card dt { font-size: .72rem; color: var(--muted, #64748b); text-transform: uppercase; letter-spacing: .03em; }
+.finance-card dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.finance-card p { margin: 0; font-size: .9rem; }
+.finance-card pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .72rem; max-height: 240px; overflow: auto; }
+.finance-card details summary { cursor: pointer; font-size: .82rem; color: var(--muted, #64748b); }
+
+.pill { border-radius: 999px; padding: .2rem .6rem; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; border: 1px solid currentColor; }
+.pill.open, .pill.succeeded, .pill.settled, .pill.delivered { color: #86efac; }
+.pill.closed, .pill.cancelled, .pill.proven_failed { color: #cbd5e1; }
+.pill.partial, .pill.money_confirmed, .pill.processing, .pill.pending { color: #fcd34d; }
+.pill.delivery_pending, .pill.unknown { color: #fca5a5; }
+.incident { border-left: 3px solid #fcd34d; padding: .5rem .75rem; background: rgba(252, 211, 77, .08); border-radius: .35rem; }
+.finance-empty, .finance-hint { color: var(--muted, #64748b); font-size: .9rem; margin: 0; }
+
+@media (max-width: 640px) {
+  .finance { padding: 1rem .75rem; }
+  .finance-form { grid-template-columns: 1fr; }
+  .finance-list { grid-template-columns: 1fr; }
+}

@@ -10,6 +10,12 @@ export * from "@youngkingz/contracts/booking";
 export * from "@youngkingz/contracts/absence";
 export * from "@youngkingz/contracts/attendance";
 export * from "@youngkingz/contracts/inventory";
+export * from "@youngkingz/contracts/money";
+export * from "@youngkingz/contracts/sales";
+export * from "@youngkingz/contracts/cash";
+export * from "@youngkingz/contracts/obligations";
+export * from "@youngkingz/contracts/checkout";
+export * from "@youngkingz/contracts/corrections";
 
 export const roles = ["OWNER", "RECEPTIONIST", "BARBER"] as const;
 export const roleSchema = z.enum(roles);
@@ -60,7 +66,26 @@ export const capabilities = [
   // corrección trazable. `attendance.read.all` es el alcance de Business
   // completo; `attendance.read` es el alcance propio del profesional.
   "attendance.register", "attendance.read", "attendance.read.all", "attendance.correct",
-  "inventory.read", "inventory.manage", "inventory.consume", "inventory.operate", "inventory.adjust", "inventory.cost.read"
+  "inventory.read", "inventory.manage", "inventory.consume", "inventory.operate", "inventory.adjust", "inventory.cost.read",
+  // ─────────────────────────────────────────────────────────────────────────
+  // H05 · CAP-05-01…07 · Finanzas, Ventas, Dinero, Caja, Obligaciones,
+  // Checkout y Correcciones.
+  //
+  // Autoridad comercial ordinaria (B-DEC-10): el Receptionist autorizado
+  // crea ventas, registra cobros ordinarios y ejecuta Checkout presencial.
+  // Los refunds, las correcciones sensibles, las obligaciones sensibles y
+  // las conciliaciones excepcionales exigen SUS PROPIAS capabilities.
+  //
+  // `inventory.operate` NO aparece aquí ni en `delegableCapabilities`: es
+  // base de rol de OWNER/RECEPTIONIST y no es delegable. El operador de
+  // Checkout NO lo necesita (F37): su autoridad es `checkout.create` y la
+  // entrega física la ejecuta la frontera interna H05→H04.
+  "sales.create", "sales.confirm", "sales.cancel", "sales.correct", "sales.discount",
+  "money.create", "money.refund", "money.allocate", "money.reconcile",
+  "cash.open", "cash.close", "cash.movement.create", "cash.adjust",
+  "checkout.create", "checkout.resume",
+  "obligations.manage", "obligations.pay", "obligations.settle",
+  "corrections.create", "operations.resolve"
 ] as const;
 export const capabilitySchema = z.enum(capabilities);
 export type Capability = z.infer<typeof capabilitySchema>;
@@ -74,6 +99,12 @@ export const delegableCapabilities: readonly Capability[] = [
   "schedules.manage"
   ,"availability.manage", "availability.impacts.read"
   ,"bookings.read", "bookings.history.read", "inventory.manage", "inventory.adjust", "inventory.cost.read"
+  // H05 · capacidades SENSIBLES delegables por grant expreso. No son base
+  // del rol RECEPTIONIST: sin grant explícito, un cajero NO puede
+  // descontar, corregir, devolver dinero, conciliar ni administrar
+  // obligaciones (B-DEC-02, B-DEC-10).
+  ,"sales.discount", "sales.correct", "money.refund", "money.reconcile", "cash.adjust"
+  ,"obligations.manage", "obligations.pay", "obligations.settle", "corrections.create", "operations.resolve"
 ];
 
 /**
@@ -132,7 +163,34 @@ export type DomainErrorCode = "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "V
   | "BOOKING_NOT_FOUND" | "GUEST_ACCESS_INVALID" | "GUEST_RECOVERY_NOT_VERIFIED" | "BOOKING_CUTOFF_EXPIRED"
   | "BOOKING_ALREADY_CANCELLED" | "BOOKING_OPERATION_CONFLICT" | "OPERATION_PENDING"
   | "BOOKING_OPERATION_NOT_RECOVERABLE" | "CLIENT_AUTH_INSUFFICIENT" | "RATE_LIMITED"
-  | "BOOKING_QUOTE_INVALID" | "BOOKING_POLICY_UNAVAILABLE" | "BOOKING_NO_SHOW_WINDOW_NOT_OPEN";
+  | "BOOKING_QUOTE_INVALID" | "BOOKING_POLICY_UNAVAILABLE" | "BOOKING_NO_SHOW_WINDOW_NOT_OPEN"
+  // ─────────────────────────────────────────────────────────────────────────
+  // H05 · errores de dominio de las 7 CAP. Se agregan al catálogo existente
+  // sin alterar ningún código previo (C01.5).
+  // Sales
+  | "SALE_NOT_FOUND" | "SALE_ALREADY_CONFIRMED" | "SALE_ALREADY_CANCELLED" | "SALE_NOT_CONFIRMED"
+  | "SALE_HAS_CONFIRMED_MONEY" | "SALE_SOURCE_INVALID" | "SALE_LINE_INVALID" | "PRICE_CHANGED"
+  | "DISCOUNT_NOT_AUTHORIZED" | "DISCOUNT_EXCEEDS_BASE" | "ATTENDANCE_NOT_TERMINAL"
+  | "ATTENDANCE_BUSINESS_MISMATCH" | "DUPLICATE_SALE_FOR_ATTENDANCE"
+  // Money
+  | "MONEY_OPERATION_NOT_FOUND" | "MONEY_NOT_CONFIRMED" | "MONEY_PAYMENT_UNKNOWN"
+  | "MONEY_ALLOCATION_EXCEEDED" | "MONEY_TARGET_INVALID" | "REFUND_EXCEEDS_AVAILABLE"
+  | "REFUND_REQUIRES_CASH_SESSION" | "REFUND_MEDIUM_MISMATCH" | "OPERATION_NOT_RESOLVABLE"
+  | "CASH_COMPONENT_REQUIRED" | "MONEY_COMPONENTS_EMPTY"
+  // Cash
+  | "CASH_SESSION_NOT_FOUND" | "CASH_SESSION_CLOSED" | "CASH_SESSION_ALREADY_OPEN"
+  | "CASH_BOX_NOT_FOUND" | "CASH_CLOSE_BLOCKED_UNKNOWN" | "CASH_SESSION_REQUIRED"
+  | "CASH_MOVEMENT_INVALID"
+  // Obligations
+  | "OBLIGATION_NOT_FOUND" | "OBLIGATION_NOT_SETTLED" | "OBLIGATION_AMOUNT_UNKNOWN"
+  | "OBLIGATION_ALREADY_SETTLED" | "OBLIGATION_PAYMENT_EXCEEDS"
+  // Checkout
+  | "CHECKOUT_NOT_FOUND" | "CHECKOUT_DELIVERY_PENDING" | "CHECKOUT_ALREADY_DELIVERED"
+  | "CHECKOUT_RESOLUTION_NOT_ALLOWED" | "CHECKOUT_AUTH_INVALID" | "CHECKOUT_SALE_MISMATCH"
+  | "INSUFFICIENT_SELLABLE_STOCK" | "DELIVERY_DUPLICATED" | "DELIVERY_SKU_MISMATCH"
+  | "DELIVERY_QUANTITY_MISMATCH" | "COMMITMENT_BUSINESS_MISMATCH"
+  // Corrections
+  | "CORRECTION_NOT_FOUND" | "CORRECTION_ALREADY_APPLIED" | "CORRECTION_TARGET_INVALID";
 export class DomainError extends Error { constructor(public readonly code: DomainErrorCode, message: string, public readonly statusCode = 400, public readonly details?: unknown) { super(message); } }
 
 export const roleCapabilities: Readonly<Record<RoleCode, readonly Capability[]>> = {
@@ -149,7 +207,15 @@ export const roleCapabilities: Readonly<Record<RoleCode, readonly Capability[]>>
     "absence.request", "absence.read", "absence.approve", "absence.reject", "absence.withdraw", "absence.apply",
     // CAP-03-08 · Prestación real (ámbito Business).
     "attendance.register", "attendance.read", "attendance.read.all", "attendance.correct",
-    "inventory.read", "inventory.operate", "inventory.consume"],
+    "inventory.read", "inventory.operate", "inventory.consume",
+    // ─────────────────────────────────────────────────────────────────────
+    // H05 · autoridad comercial ordinaria (B-DEC-10).
+    // El Receptionist autorizado crea y confirma ventas, registra cobros
+    // ordinarios, opera la caja y ejecuta Checkout presencial.
+    "sales.create", "sales.confirm", "sales.cancel",
+    "money.create", "money.allocate",
+    "cash.open", "cash.close", "cash.movement.create",
+    "checkout.create", "checkout.resume"],
   // BARBER · agenda propia y acciones explícitamente autorizadas sobre su ámbito:
   // lee únicamente sus propias reservas (`bookings.self.read`, sin
   // `bookings.read`), y registra llegada / no-show sólo sobre reservas
