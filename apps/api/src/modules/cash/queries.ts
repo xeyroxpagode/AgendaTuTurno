@@ -13,7 +13,7 @@ export const cashSessionQuerySchema = z.object({
 export async function listCashSessions(actor: Actor, query: z.infer<typeof cashSessionQuerySchema>) {
   requireCapability(actor, "cash.open");
   return rows(sql`
-    select s.id, s.cashbox_id "cashboxId", b.name "cashboxName", s.status::text status,
+    select s.id "cashSessionId", s.cashbox_id "cashboxId", b.name "cashboxName", s.status::text status,
            s.opened_by_account_id "openedByAccountId", s.opened_at "openedAt",
            s.opening_amount_minor::int "openingAmountMinor", s.closed_at "closedAt",
            s.counted_amount_minor::int "countedAmountMinor", s.expected_amount_minor::int "expectedAmountMinor",

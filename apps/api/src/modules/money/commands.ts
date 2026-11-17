@@ -38,6 +38,26 @@ import {
  *  · un UNKNOWN nunca se resuelve a FAILED por timeout (D20).
  */
 
+/**
+ * Defensa en profundidad (ACC-01 / B-DEC-03): ningún componente externo puede
+ * quedar CONFIRMED sin referencia operativa Y evidencia. No basta con el
+ * esquema Zod de la request: se revalida en el servicio antes de persistir.
+ */
+export function assertExternalEvidence(components: readonly MoneyComponent[]): void {
+  for (const component of components) {
+    if (component.method === "TRANSFER" && component.accredited) {
+      if (!component.reference || component.reference.trim().length < 3 || !component.evidenceReference || component.evidenceReference.trim().length < 3) {
+        throw new DomainError("MONEY_EVIDENCE_REQUIRED", "La acreditación de la transferencia exige referencia y evidencia verificables", 400);
+      }
+    }
+    if (component.method === "CARD" && component.outcome === "CONFIRMED") {
+      if (!component.reference || component.reference.trim().length < 3 || !component.evidenceReference || component.evidenceReference.trim().length < 3) {
+        throw new DomainError("MONEY_EVIDENCE_REQUIRED", "La confirmación de tarjeta exige referencia de terminal y evidencia verificables", 400);
+      }
+    }
+  }
+}
+
 type ConfirmedPortion = {
   confirmedMinor: number;
   changeMinor: number;
@@ -64,6 +84,7 @@ function portionOf(components: readonly MoneyComponent[]): ConfirmedPortion {
 export async function createMoneyOperation(actor: Actor, body: unknown, operationId: string) {
   requireCapability(actor, "money.create");
   const input = moneyOperationInputSchema.parse(body);
+  assertExternalEvidence(input.components);
   const status = deriveOperationStatus(input.components);
 
   if (status === "SUCCEEDED") {
@@ -430,6 +451,9 @@ export async function resolveMoneyOperation(actor: Actor, moneyOperationId: stri
       await tx`
         update system.operation_attempts set status='FAILED', response_status=409, error_code='PROVEN_FAILED', completed_at=now()
          where operation_id = ${operation.operationId} and business_id = ${actor.businessId}`;
+      await tx`
+        update checkout.checkouts set status='FAILED', updated_at=now()
+         where business_id = ${actor.businessId} and money_operation_id = ${moneyOperationId} and status = 'UNKNOWN'`;
       await audit(tx, {
         actor, operationId, action: "money.resolve_failed", capability: "operations.resolve",
         resourceType: "MONEY_OPERATION", resourceId: moneyOperationId,
@@ -465,6 +489,10 @@ export async function resolveMoneyOperation(actor: Actor, moneyOperationId: stri
     await tx`
       update system.operation_attempts set status='SUCCEEDED', response_status=200, response_body=${JSON.stringify(snapshot)}::jsonb, completed_at=now()
        where operation_id = ${operation.operationId} and business_id = ${actor.businessId}`;
+    // El checkout coordinado refleja el resultado real del cobro resuelto.
+    await tx`
+      update checkout.checkouts set status='MONEY_CONFIRMED', updated_at=now()
+       where business_id = ${actor.businessId} and money_operation_id = ${moneyOperationId} and status = 'UNKNOWN'`;
 
     // El dinero recién confirmado se aplica a su destino con las MISMAS
     // reglas que el cobro original.

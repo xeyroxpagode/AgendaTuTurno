@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api/client";
 import {
   financeApi, formatARS, releaseOperationId, stableOperationId,
@@ -36,6 +37,7 @@ export function FinanceWorkspace({ initialView = "CAJA" }: { initialView?: Finan
   const [status, setStatus] = useState<Status>({ kind: "idle", message: "" });
   const [dirty, setDirty] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const router = useRouter();
 
   const can = useCallback((capability: string) => Boolean(context?.capabilities.includes(capability)), [context]);
 
@@ -105,7 +107,11 @@ export function FinanceWorkspace({ initialView = "CAJA" }: { initialView?: Finan
       <div className={`finance-status ${status.kind}`} role="status" aria-live="polite" data-testid="finance-status">
         {status.kind !== "idle" && <span>{status.message}</span>}
         {status.operationId && status.kind === "unknown" && (
-          <button type="button" onClick={() => { setView("S33"); window.sessionStorage.setItem("yk-h05-last-attempt", status.operationId!); }}>
+          <button type="button" onClick={() => {
+            window.sessionStorage.setItem("yk-h05-last-attempt", status.operationId!);
+            setView("S33");
+            router.push("/cobro-incierto");
+          }}>
             Consultar intento original
           </button>
         )}

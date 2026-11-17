@@ -92,8 +92,14 @@ export const transferComponentSchema = z.object({
   reference: z.string().trim().max(200).optional(),
   evidenceReference: z.string().trim().max(200).optional(),
 }).strict().superRefine((value, context) => {
+  // B-DEC-03: una declaración del cliente NO es acreditación bancaria. La V1
+  // permite confirmación manual autorizada, pero exige referencia operativa
+  // AND evidencia de la acreditación. Sin ambos, el componente NO es dinero.
   if (value.accredited && !value.reference) {
     context.addIssue({ code: "custom", path: ["reference"], message: "Una transferencia acreditada exige referencia comprobable" });
+  }
+  if (value.accredited && (!value.evidenceReference || value.evidenceReference.trim().length < 3)) {
+    context.addIssue({ code: "custom", path: ["evidenceReference"], message: "Una transferencia acreditada exige evidencia de la acreditación" });
   }
 });
 
@@ -107,10 +113,24 @@ export const transferComponentSchema = z.object({
 export const cardComponentSchema = z.object({
   method: z.literal("CARD"),
   amountMinor: positiveAmountMinorSchema,
-  outcome: z.enum(["CONFIRMED", "UNKNOWN"]).default("CONFIRMED"),
+  /**
+   * Por defecto NO se confirma: la ausencia de un resultado verificable de la
+   * terminal jamás puede traducirse en dinero confirmado (F12/F13, B-DEC-03).
+   */
+  outcome: z.enum(["CONFIRMED", "UNKNOWN"]).default("UNKNOWN"),
   reference: z.string().trim().max(200).optional(),
   evidenceReference: z.string().trim().max(200).optional(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  // Sólo un resultado REAL de terminal, con referencia operativa y evidencia,
+  // puede acreditar una tarjeta externa. No se almacenan PAN/CVV: el esquema
+  // es estricto y rechaza cualquier campo adicional.
+  if (value.outcome === "CONFIRMED" && (!value.reference || value.reference.trim().length < 3)) {
+    context.addIssue({ code: "custom", path: ["reference"], message: "Una tarjeta confirmada exige la referencia operativa de la terminal" });
+  }
+  if (value.outcome === "CONFIRMED" && (!value.evidenceReference || value.evidenceReference.trim().length < 3)) {
+    context.addIssue({ code: "custom", path: ["evidenceReference"], message: "Una tarjeta confirmada exige evidencia del resultado de la terminal" });
+  }
+});
 
 export const moneyComponentSchema = z.discriminatedUnion("method", [
   cashComponentSchema,

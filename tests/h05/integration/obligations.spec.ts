@@ -38,7 +38,7 @@ describe("H05 Obligations (F28–F30)", () => {
       kind: "PAYABLE", title: "Factura de luz", counterpartyName: "Compañía", amountMinor: 10_000
     }, op());
     const money = await createMoneyOperation(owner, {
-      components: [{ method: "CARD", amountMinor: 10_000, outcome: "CONFIRMED", reference: "PAY-OBL" }]
+      components: [{ method: "CARD", amountMinor: 10_000, outcome: "CONFIRMED", reference: "PAY-OBL", evidenceReference: "EV-PAY-OBL" }]
     }, op());
     const partial = await payObligation(owner, String(obligation.data.id), {
       moneyOperationId: String(money.data.id), amountMinor: 4_000

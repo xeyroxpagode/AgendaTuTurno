@@ -62,7 +62,7 @@ describe("H05 Money y Recovery (F08–F19, F36, F40, F41)", () => {
 
   it("F10/F11 · transferencia acreditada cuenta; no acreditada no es dinero", async () => {
     const accredited = await createMoneyOperation(owner, {
-      components: [{ method: "TRANSFER", amountMinor: 5_000, accredited: true, reference: "TR-123" }]
+      components: [{ method: "TRANSFER", amountMinor: 5_000, accredited: true, reference: "TR-123", evidenceReference: "EV-TR-123" }]
     }, op());
     expect(accredited.data.status).toBe("SUCCEEDED");
     expect(accredited.data.confirmedMinor).toBe(5_000);
@@ -78,7 +78,7 @@ describe("H05 Money y Recovery (F08–F19, F36, F40, F41)", () => {
 
   it("F12/F13 · tarjeta confirmada cuenta; UNKNOWN no se degrada a FAILED", async () => {
     const confirmed = await createMoneyOperation(owner, {
-      components: [{ method: "CARD", amountMinor: 4_000, outcome: "CONFIRMED", reference: "TERM-9" }]
+      components: [{ method: "CARD", amountMinor: 4_000, outcome: "CONFIRMED", reference: "TERM-9", evidenceReference: "EV-TERM-9" }]
     }, op());
     expect(confirmed.data.status).toBe("SUCCEEDED");
 
@@ -101,8 +101,8 @@ describe("H05 Money y Recovery (F08–F19, F36, F40, F41)", () => {
       cashSessionId,
       components: [
         { method: "CASH", amountMinor: 3_000, changeMinor: 0 },
-        { method: "TRANSFER", amountMinor: 2_000, accredited: true, reference: "MIX-1" },
-        { method: "CARD", amountMinor: 1_000, outcome: "CONFIRMED", reference: "MIX-2" }
+        { method: "TRANSFER", amountMinor: 2_000, accredited: true, reference: "MIX-1", evidenceReference: "EV-MIX-1" },
+        { method: "CARD", amountMinor: 1_000, outcome: "CONFIRMED", reference: "MIX-2", evidenceReference: "EV-MIX-2" }
       ]
     }, op());
     expect(result.data.components).toHaveLength(3);
@@ -135,7 +135,7 @@ describe("H05 Money y Recovery (F08–F19, F36, F40, F41)", () => {
 
   it("F17 · carrera concurrente con el mismo operation_id: un solo efecto", async () => {
     const operationId = op();
-    const body = { components: [{ method: "CARD", amountMinor: 1_000, outcome: "CONFIRMED", reference: "RACE" }] };
+    const body = { components: [{ method: "CARD", amountMinor: 1_000, outcome: "CONFIRMED", reference: "RACE", evidenceReference: "EV-RACE" }] };
     const results = await Promise.allSettled([
       createMoneyOperation(owner, body, operationId),
       createMoneyOperation(owner, body, operationId)
@@ -147,7 +147,7 @@ describe("H05 Money y Recovery (F08–F19, F36, F40, F41)", () => {
 
   it("F18 · refund es un hecho NUEVO y conserva el original", async () => {
     const original = await createMoneyOperation(owner, {
-      components: [{ method: "CARD", amountMinor: 10_000, outcome: "CONFIRMED", reference: "REF-ORIG" }]
+      components: [{ method: "CARD", amountMinor: 10_000, outcome: "CONFIRMED", reference: "REF-ORIG", evidenceReference: "EV-REF-ORIG" }]
     }, op());
     const refund = await refundMoney(owner, String(original.data.id), {
       amountMinor: 4_000, reason: "Producto con defecto", evidenceReference: "REFPROOF-1"
@@ -181,7 +181,7 @@ describe("H05 Money y Recovery (F08–F19, F36, F40, F41)", () => {
 
   it("F36 · RECEPTIONIST sin grant no puede hacer refund", async () => {
     const charge = await createMoneyOperation(owner, {
-      components: [{ method: "CARD", amountMinor: 1_000, outcome: "CONFIRMED", reference: "DENIED" }]
+      components: [{ method: "CARD", amountMinor: 1_000, outcome: "CONFIRMED", reference: "DENIED", evidenceReference: "EV-DENIED" }]
     }, op());
     await expect(refundMoney(receptionist, String(charge.data.id), {
       amountMinor: 500, reason: "Intento no autorizado"

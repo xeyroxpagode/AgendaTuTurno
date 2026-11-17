@@ -41,7 +41,7 @@ describe("H05 Correcciones (D14/D26)", () => {
 
   it("corrección monetaria NO genera dinero nuevo ni toca stock", async () => {
     const money = await createMoneyOperation(owner, {
-      components: [{ method: "CARD", amountMinor: 3_000, outcome: "CONFIRMED", reference: "COR-MONEY" }]
+      components: [{ method: "CARD", amountMinor: 3_000, outcome: "CONFIRMED", reference: "COR-MONEY", evidenceReference: "EV-COR-MONEY" }]
     }, op());
     const [positionBefore] = await database.client`select physical::int physical from inventory.positions where business_id = ${owner.businessId} and sku = ${item.sku} and purpose = 'SALE'`;
     const before = await database.client`select count(*)::int n from money.money_operations where business_id = ${owner.businessId}`;

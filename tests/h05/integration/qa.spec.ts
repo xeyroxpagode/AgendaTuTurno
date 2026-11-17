@@ -76,7 +76,7 @@ describe("H05 BD, migraciones y seguridad (F43–F45)", () => {
     const other = await seedActor(await seedBusiness("H05 BD Otro"), "OWNER", "Otro");
     await expect(createMoneyOperation(other, {
       saleId: "00000000-0000-0000-0000-000000000000",
-      components: [{ method: "CARD", amountMinor: 1_000, outcome: "CONFIRMED", reference: "X" }]
+      components: [{ method: "CARD", amountMinor: 1_000, outcome: "CONFIRMED", reference: "CROSS-BIZ-1", evidenceReference: "EV-CROSS-BIZ-1" }]
     }, op())).rejects.toMatchObject({ code: "23503" }); // FK compuesta: otra negocio no puede aplicar dinero
   });
 

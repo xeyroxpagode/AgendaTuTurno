@@ -5,7 +5,7 @@ import { audit, executeOperation, prepareDurableOperation, settleDurableOperatio
 import { database } from "../../lib/runtime.js";
 import { assertActorStillAuthorized, checkRevision, conflict, lockBusiness, missing, requireCapability } from "../h05/domain.js";
 import { checkoutSnapshot, issueCheckoutAuthority, loadCheckout, productLinesOf } from "./domain.js";
-import { applyConfirmedPortion, insertMoneyOperation, performRefund } from "../money/commands.js";
+import { applyConfirmedPortion, assertExternalEvidence, insertMoneyOperation, performRefund } from "../money/commands.js";
 import { deriveOperationStatus } from "../money/domain.js";
 import { confirmStockCommitments, deliverStockCommitments } from "../inventory/commitments.js";
 
@@ -34,6 +34,7 @@ import { confirmStockCommitments, deliverStockCommitments } from "../inventory/c
 export async function createCheckout(actor: Actor, body: unknown, operationId: string) {
   requireCapability(actor, "checkout.create");
   const input = createCheckoutSchema.parse(body);
+  assertExternalEvidence(input.components as MoneyComponent[]);
   const checkoutId = randomUUID();
 
   const prepared = await executeOperation({
@@ -129,9 +130,12 @@ export async function createCheckout(actor: Actor, body: unknown, operationId: s
        where operation_id = ${operationId} and business_id = ${actor.businessId} and status = 'SUCCEEDED'`;
   }
 
-  // 4 · Entrega física: efecto POSTERIOR. Un fallo NO borra el dinero: abre
-  // una incidencia recuperable (F33).
-  if (input.deliver && prepared.data.commitmentIds.length) {
+  // 4 · Entrega física: efecto POSTERIOR, pero SÓLO con cobertura monetaria.
+  // D16/F31: un checkout ordinario no se entrega si el dinero externo no fue
+  // confirmado. La reserva queda activa y el checkout permanece UNKNOWN para
+  // su recuperación por el mismo operation_id.
+  const moneyFullyConfirmed = prepared.data.moneyStatus === "SUCCEEDED" && prepared.data.confirmedMinor >= prepared.data.totalMinor;
+  if (input.deliver && moneyFullyConfirmed && prepared.data.commitmentIds.length) {
     await attemptDelivery(actor, prepared.data.checkoutId, prepared.data.commitmentIds);
   }
 
@@ -174,6 +178,12 @@ async function attemptDelivery(actor: Actor, checkoutId: string, commitmentIds: 
     });
     return { delivered: true };
   } catch (error) {
+    // Un fallo de autoridad NO es una incidencia de entrega: debe propagarse.
+    // Convertirlo en DELIVERY_PENDING permitiría que un actor revocado escriba
+    // auditoría y modifique el checkout (F34/F37).
+    if (error instanceof DomainError && ["SESSION_REVOKED", "FORBIDDEN", "CHECKOUT_AUTH_INVALID", "COMMITMENT_BUSINESS_MISMATCH"].includes(error.code)) {
+      throw error;
+    }
     const reason = error instanceof DomainError ? error.message : "La entrega física no pudo confirmarse";
     await database.client.begin(async (tx) => {
       await tx`
@@ -205,6 +215,10 @@ export async function resumeCheckout(actor: Actor, checkoutId: string, body: unk
     payload: { checkoutId, ...input }
   }, async (tx) => {
     await lockBusiness(tx, actor.businessId);
+    // F34/F37: la autoridad se revalida DENTRO de la transacción. Una sesión
+    // revocada o una capability retirada no debe escribir auditoría ni
+    // modificar el checkout, aunque el Actor en memoria conserve la capability.
+    await assertActorStillAuthorized(tx, actor, input.resolution === "REFUND" ? "money.refund" : "checkout.resume");
     const checkout = await loadCheckout(tx, actor.businessId, checkoutId, true);
     checkRevision(checkout.revision, input.expectedRevision);
     if (checkout.status === "DELIVERED") throw new DomainError("CHECKOUT_ALREADY_DELIVERED", "El checkout ya fue entregado", 409);
@@ -214,6 +228,17 @@ export async function resumeCheckout(actor: Actor, checkoutId: string, body: unk
     const deliveryAllowed = checkout.status === "DELIVERY_PENDING" || checkout.status === "MONEY_CONFIRMED";
     if (!deliveryAllowed || (input.resolution === "REFUND" && checkout.status !== "DELIVERY_PENDING")) {
       throw new DomainError("CHECKOUT_RESOLUTION_NOT_ALLOWED", "Este checkout no admite esa resolución en su estado actual", 409, { status: checkout.status });
+    }
+    if (input.resolution === "DELIVER") {
+      const [money] = await tx`
+        select status::text status, confirmed_minor::int "confirmedMinor"
+          from money.money_operations
+         where business_id = ${actor.businessId} and id = ${checkout.moneyOperationId}`;
+      if (!money || String(money.status) !== "SUCCEEDED" || Number(money.confirmedMinor) < checkout.totalMinor) {
+        throw new DomainError("MONEY_NOT_CONFIRMED", "No se puede entregar sin cobertura monetaria confirmada", 409, {
+          confirmedMinor: Number(money?.confirmedMinor ?? 0), requiredMinor: checkout.totalMinor
+        });
+      }
     }
     await audit(tx, {
       actor, operationId, action: "checkout.resume", capability: input.resolution === "REFUND" ? "money.refund" : "checkout.resume",

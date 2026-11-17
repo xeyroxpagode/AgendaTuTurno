@@ -28,14 +28,14 @@ describe("H05 contratos compartidos", () => {
   });
 
   it("una transferencia no acreditada no es dinero confirmado", () => {
-    const accredited = transferComponentSchema.parse({ method: "TRANSFER", amountMinor: 5000, accredited: true, reference: "OP-1" });
+    const accredited = transferComponentSchema.parse({ method: "TRANSFER", amountMinor: 5000, accredited: true, reference: "OP-1", evidenceReference: "EV-OP-1" });
     const pending = transferComponentSchema.parse({ method: "TRANSFER", amountMinor: 5000, accredited: false });
     expect(() => transferComponentSchema.parse({ method: "TRANSFER", amountMinor: 5000, accredited: true })).toThrow();
     expect(sumConfirmedAmounts([accredited, pending])).toBe(5000);
   });
 
   it("una tarjeta UNKNOWN no cuenta como dinero confirmado", () => {
-    const confirmed = cardComponentSchema.parse({ method: "CARD", amountMinor: 5000, outcome: "CONFIRMED", reference: "TERM-1" });
+    const confirmed = cardComponentSchema.parse({ method: "CARD", amountMinor: 5000, outcome: "CONFIRMED", reference: "TERM-1", evidenceReference: "EV-TERM-1" });
     const unknown = cardComponentSchema.parse({ method: "CARD", amountMinor: 5000, outcome: "UNKNOWN" });
     expect(sumConfirmedAmounts([confirmed, unknown])).toBe(5000);
     expect(sumConfirmedAmounts([unknown])).toBe(0);
@@ -44,7 +44,7 @@ describe("H05 contratos compartidos", () => {
   it("el vuelto se suma exactamente y nunca es negativo", () => {
     const components = moneyComponentSchema.array().parse([
       { method: "CASH", amountMinor: 8000, tenderedMinor: 10000, changeMinor: 2000 },
-      { method: "CARD", amountMinor: 4000, outcome: "CONFIRMED", reference: "T-1" }
+      { method: "CARD", amountMinor: 4000, outcome: "CONFIRMED", reference: "T-1", evidenceReference: "EV-T-1" }
     ]);
     expect(sumChangeAmounts(components)).toBe(2000);
     expect(sumConfirmedAmounts(components)).toBe(12000);
