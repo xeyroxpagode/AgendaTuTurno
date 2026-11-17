@@ -218,9 +218,13 @@ actualización de dependencias: queda fuera del alcance H05.
 
 ## 11. Commits técnicos
 
-Se realizan commits focalizados por dominio sobre la branch H05, con rutas
-explícitas (ver `git log` al cierre). No se incluyen los cambios preexistentes
-ajenos a H05 listados en §1.
+| Commit | Descripción |
+|---|---|
+| `52bc9bc52266435eac23d768aad05ba1a6816bf2` | Implementación global H05: 7 CAP, contratos, migración, API, UX, tests y evidencia |
+
+Todo se stageó por ruta explícita. No se incluyeron los cambios preexistentes
+ajenos a H05 listados en §1, que permanecen intactos en el working tree.
+No se hizo push.
 
 ---
 
