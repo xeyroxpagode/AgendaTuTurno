@@ -16,6 +16,7 @@ export * from "@youngkingz/contracts/cash";
 export * from "@youngkingz/contracts/obligations";
 export * from "@youngkingz/contracts/checkout";
 export * from "@youngkingz/contracts/corrections";
+export * from "@youngkingz/contracts/orders";
 
 export const roles = ["OWNER", "RECEPTIONIST", "BARBER"] as const;
 export const roleSchema = z.enum(roles);
@@ -85,7 +86,16 @@ export const capabilities = [
   "cash.open", "cash.close", "cash.movement.create", "cash.adjust",
   "checkout.create", "checkout.resume",
   "obligations.manage", "obligations.pay", "obligations.settle",
-  "corrections.create", "operations.resolve"
+  "corrections.create", "operations.resolve",
+  // ─────────────────────────────────────────────────────────────────────────
+  // H06 · CAP-06-01..07 · Pedidos de productos para retiro.
+  // Según C01 §10.1 (T-11): once capabilities `orders.*`. Cliente e invitado
+  // se autorizan por H03 (credencial/vínculo), NO por IAM; BARBER no recibe
+  // ninguna (D10/Q30).
+  // `inventory.operate` NO se concede: H04 usa autoridad específica ORDER.
+  "orders.read", "orders.create", "orders.confirm", "orders.reject",
+  "orders.prepare", "orders.ready", "orders.cancel", "orders.deliver",
+  "orders.cancel_confirmed", "orders.exception.resolve", "orders.credential.reissue"
 ] as const;
 export const capabilitySchema = z.enum(capabilities);
 export type Capability = z.infer<typeof capabilitySchema>;
@@ -105,6 +115,9 @@ export const delegableCapabilities: readonly Capability[] = [
   // obligaciones (B-DEC-02, B-DEC-10).
   ,"sales.discount", "sales.correct", "money.refund", "money.reconcile", "cash.adjust"
   ,"obligations.manage", "obligations.pay", "obligations.settle", "corrections.create", "operations.resolve"
+  // H06 · sólo operaciones sensibles de pedidos se delegan por grant expreso
+  // (C01 §10.1). Las ordinarias son base de OWNER/RECEPTIONIST.
+  ,"orders.read", "orders.cancel_confirmed", "orders.exception.resolve", "orders.credential.reissue"
 ];
 
 /**
@@ -190,7 +203,13 @@ export type DomainErrorCode = "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "V
   | "INSUFFICIENT_SELLABLE_STOCK" | "DELIVERY_DUPLICATED" | "DELIVERY_SKU_MISMATCH"
   | "DELIVERY_QUANTITY_MISMATCH" | "COMMITMENT_BUSINESS_MISMATCH"
   // Corrections
-  | "CORRECTION_NOT_FOUND" | "CORRECTION_ALREADY_APPLIED" | "CORRECTION_TARGET_INVALID";
+  | "CORRECTION_NOT_FOUND" | "CORRECTION_ALREADY_APPLIED" | "CORRECTION_TARGET_INVALID"
+  // H06 · CAP-06-01..07 (C01 §10.5). Códigos ORDER_* + el genérico
+  // `BUSINESS_NOT_FOUND`, que evita revelar existencia de un negocio ajeno.
+  | "ORDER_NOT_FOUND" | "ORDER_STATE_INVALID" | "ORDER_NOT_OWNED"
+  | "INCOMPLETE_COMMITMENT_SET" | "ORDER_CREDENTIAL_INVALID" | "ORDER_CREDENTIAL_REVOKED"
+  | "MONEY_BLOCKS_CANCEL" | "ORDER_EXCEPTION_NOT_AUTHORIZED" | "ORDER_ALREADY_DELIVERED"
+  | "BUSINESS_NOT_FOUND";
 export class DomainError extends Error { constructor(public readonly code: DomainErrorCode, message: string, public readonly statusCode = 400, public readonly details?: unknown) { super(message); } }
 
 export const roleCapabilities: Readonly<Record<RoleCode, readonly Capability[]>> = {
@@ -215,7 +234,13 @@ export const roleCapabilities: Readonly<Record<RoleCode, readonly Capability[]>>
     "sales.create", "sales.confirm", "sales.cancel",
     "money.create", "money.allocate",
     "cash.open", "cash.close", "cash.movement.create",
-    "checkout.create", "checkout.resume"],
+    "checkout.create", "checkout.resume",
+    // H06 · autoridad comercial ordinaria de pedidos (C01 §10.1). NO se
+    // conceden `orders.cancel_confirmed` ni `orders.exception.resolve`:
+    // requieren grant explícito y, en el segundo caso, rol OWNER.
+    "orders.read", "orders.create", "orders.confirm", "orders.reject",
+    "orders.prepare", "orders.ready", "orders.cancel", "orders.deliver",
+    "orders.credential.reissue"],
   // BARBER · agenda propia y acciones explícitamente autorizadas sobre su ámbito:
   // lee únicamente sus propias reservas (`bookings.self.read`, sin
   // `bookings.read`), y registra llegada / no-show sólo sobre reservas

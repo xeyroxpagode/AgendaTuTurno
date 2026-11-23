@@ -122,6 +122,57 @@ export async function saleSnapshot(tx: Tx, businessId: string, saleId: string): 
 }
 
 /**
+ * G01 / D16 · Correctivo P0 de precio confirmado.
+ *
+ * Una Sale ligada a una ProductOrder NO puede revalidar precios contra el
+ * catálogo vigente: el precio quedó congelado en `confirmed_snapshot` al
+ * confirmar. Aquí se verifica, DENTRO de la Tx, que:
+ *  · la Order existe en el mismo Business y está en fase post-CONFIRMED;
+ *  · cada línea de la Sale coincide EXACTAMENTE con el snapshot confirmado
+ *    (SKU, ubicación, cantidad y precio);
+ *  · el artículo sigue siendo publicable y la ubicación activa (los demás
+ *    controles H05 permanecen vigentes).
+ *
+ * Sin este correctivo, un cambio de precio público posterior a CONFIRMED
+ * provocaba `PRICE_CHANGED` y bloqueaba un retiro ya confirmado.
+ */
+async function assertConfirmedOrderLines(tx: Tx, actor: Actor, orderId: string, lines: readonly SaleLineInput[]): Promise<void> {
+  const [order] = await tx`
+    select id, status::text status, confirmed_snapshot "confirmedSnapshot"
+      from orders.product_orders
+     where business_id = ${actor.businessId} and id = ${orderId} for update`;
+  if (!order) throw new DomainError("ORDER_NOT_FOUND", "La orden causal no existe en este negocio", 404);
+  if (!["CONFIRMED", "PREPARING", "READY"].includes(String(order.status))) {
+    throw new DomainError("SALE_SOURCE_INVALID", "La Sale causal exige una orden confirmada", 409);
+  }
+  const snapshot = (order.confirmedSnapshot ?? {}) as {
+    items?: Array<{ sku: string; locationId: string | null; quantity: number; unitPriceMinor: number }>
+  };
+  if (!snapshot.items?.length) throw new DomainError("SALE_SOURCE_INVALID", "La orden no tiene snapshot confirmado", 409);
+  const expected = new Map(snapshot.items.map((item) => [`${item.sku}|${item.locationId ?? ""}`, item]));
+  if (expected.size !== lines.length) throw new DomainError("SALE_LINE_INVALID", "Las líneas de la Sale no coinciden con el snapshot confirmado", 409);
+  for (const line of lines) {
+    if (line.kind !== "PRODUCT" || !line.sku || !line.locationId) {
+      throw new DomainError("SALE_LINE_INVALID", "La Sale de una orden sólo admite líneas de producto con ubicación", 409);
+    }
+    const item = expected.get(`${line.sku}|${line.locationId}`);
+    if (!item || item.quantity !== line.quantity || item.unitPriceMinor !== line.unitPriceMinor) {
+      throw new DomainError("SALE_LINE_INVALID", "Precio o cantidad de la Sale no coinciden con el snapshot confirmado", 409, { sku: line.sku });
+    }
+    const [catalog] = await tx`
+      select active, published, use::text use
+        from inventory.items where business_id = ${actor.businessId} and sku = ${line.sku}`;
+    if (!catalog || !catalog.active || !catalog.published || catalog.use === "INTERNAL") {
+      throw new DomainError("SALE_SOURCE_INVALID", `El artículo ${line.sku} dejó de ser publicable`, 409);
+    }
+    const [location] = await tx`
+      select active from inventory.locations
+       where business_id = ${actor.businessId} and id = ${line.locationId}`;
+    if (!location || !location.active) throw new DomainError("SALE_SOURCE_INVALID", "La ubicación confirmada está inactiva", 409);
+  }
+}
+
+/**
  * Resuelve el origen causal y devuelve las líneas con su SNAPSHOT de precio.
  *
  * · desde Attendance → los servicios salen del snapshot performed de la
@@ -133,8 +184,12 @@ export async function resolveSaleLines(tx: Tx, actor: Actor, input: {
   attendanceId?: string | undefined;
   contactSnapshot?: { name: string; phone: string; email?: string } | undefined;
   lines: SaleLineInput[];
-}): Promise<{ source: "ATTENDANCE" | "WALK_IN" | "DIRECT"; lines: SaleLineInput[]; contactSnapshot: unknown; attendanceId: string | null }> {
+}, options?: { confirmedOrderId?: string }): Promise<{ source: "ATTENDANCE" | "WALK_IN" | "DIRECT"; lines: SaleLineInput[]; contactSnapshot: unknown; attendanceId: string | null }> {
   const businessId = actor.businessId;
+  // G01 / D16: una Sale causal de ProductOrder usa el SNAPSHOT CONFIRMADO.
+  // El parámetro es INTERNO (server-to-server) y se valida contra la Order
+  // dentro de la Tx; nunca llega desde el body HTTP (createSaleSchema.strict).
+  if (options?.confirmedOrderId) await assertConfirmedOrderLines(tx, actor, options.confirmedOrderId, input.lines);
 
   if (input.attendanceId) {
     const [attendance] = await tx`
@@ -169,7 +224,7 @@ export async function resolveSaleLines(tx: Tx, actor: Actor, input: {
     });
     const productLines = input.lines.filter((line) => line.kind === "PRODUCT");
     const lines = [...serviceLines, ...productLines];
-    await assertProductLines(tx, actor, productLines);
+    if (!options?.confirmedOrderId) await assertProductLines(tx, actor, productLines);
     return {
       source: "ATTENDANCE",
       lines,
@@ -183,7 +238,7 @@ export async function resolveSaleLines(tx: Tx, actor: Actor, input: {
     if (productLines.length !== input.lines.length) {
       throw new DomainError("SALE_SOURCE_INVALID", "Un walk-in documenta contacto; los servicios requieren una atención real", 400);
     }
-    await assertProductLines(tx, actor, productLines);
+    if (!options?.confirmedOrderId) await assertProductLines(tx, actor, productLines);
     return {
       source: "WALK_IN",
       lines: input.lines,
@@ -195,7 +250,7 @@ export async function resolveSaleLines(tx: Tx, actor: Actor, input: {
   if (!input.lines.length || input.lines.some((line) => line.kind !== "PRODUCT")) {
     throw new DomainError("SALE_SOURCE_INVALID", "La venta necesita un origen causal: atención, walk-in o producto directo", 400);
   }
-  await assertProductLines(tx, actor, input.lines);
+  if (!options?.confirmedOrderId) await assertProductLines(tx, actor, input.lines);
   return { source: "DIRECT", lines: input.lines, contactSnapshot: null, attendanceId: null };
 }
 

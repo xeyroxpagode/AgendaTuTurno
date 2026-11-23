@@ -5,38 +5,44 @@
  * - Prueba de intención: alta entropía; el backend guarda solo el digest.
  * - Envelope de entrega: AES-256-GCM con claves server-side versionadas.
  */
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { DomainError } from "@youngkingz/contracts";
+import {
+  INTENT_PROOF_BYTES,
+  OPAQUE_TOKEN_BYTES,
+  createIntentProof,
+  intentProofDigest as sharedIntentProofDigest,
+  issueOpaqueToken,
+  opaqueTokenDigest,
+  safeEqualOpaqueToken,
+} from "../../../lib/security/opaque-token.js";
 
 /* ─────────────────────────── Intent proof ─────────────────────────── */
 
-export const INTENT_PROOF_BYTES = 32;
+export { INTENT_PROOF_BYTES };
 
 export function createIntent(): { intentId: string; proof: string } {
-  return { intentId: randomUUID(), proof: randomBytes(INTENT_PROOF_BYTES).toString("base64url") };
+  return createIntentProof();
 }
 
 export function intentProofDigest(proof: string): string {
-  return createHash("sha256").update(proof, "utf8").digest("base64url");
+  return sharedIntentProofDigest(proof);
 }
 
 export function safeEqualBase64Url(a: string, b: string): boolean {
-  const ba = Buffer.from(a, "utf8");
-  const bb = Buffer.from(b, "utf8");
-  return ba.length === bb.length && timingSafeEqual(ba, bb);
+  return safeEqualOpaqueToken(a, b);
 }
 
 /* ─────────────────────────── Guest token ─────────────────────────── */
 
-export const GUEST_TOKEN_BYTES = 32;
+export const GUEST_TOKEN_BYTES = OPAQUE_TOKEN_BYTES;
 
 export function issueGuestToken(): { token: string; digest: string } {
-  const token = randomBytes(GUEST_TOKEN_BYTES).toString("base64url");
-  return { token, digest: guestTokenDigest(token) };
+  return issueOpaqueToken();
 }
 
 export function guestTokenDigest(token: string): string {
-  return createHash("sha256").update(token, "utf8").digest("base64url");
+  return opaqueTokenDigest(token);
 }
 
 /* ─────────────────── Delivery envelope (AEAD) ─────────────────── */

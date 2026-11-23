@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { InventoryWorkspace } from "@/features/inventory/InventoryWorkspace";
 export default async function InventoryDeepLink({params}:{params:Promise<{path:string[]}>}){
   const {path}=await params;
-  const views={articulos:'CATALOG',movimientos:'HISTORY',ubicaciones:'LOCATIONS',conteos:'COUNTS',minimos:'ROOT'} as const;
+  const views={articulos:'CATALOG',movimientos:'HISTORY',ubicaciones:'LOCATIONS',conteos:'COUNTS',minimos:'ROOT',pedidos:'PEDIDOS'} as const;
   const view=views[path[0] as keyof typeof views];if(!view||path.length>2)notFound();
   const create=path[0]==='articulos'&&path[1]==='nuevo';
   const itemId=path[0]==='articulos'&&path[1]&&!create?path[1]:undefined;

@@ -57,8 +57,8 @@ async function assertIsolatedTarget(root: string, database: string): Promise<voi
   if (!config.includes(EXPECTED_PROJECT) || !config.includes(EXPECTED_PORT)) {
     throw new Error("Target no verificado: la configuración local de Supabase no declara el proyecto aislado.");
   }
-  if (!/^youngkingz_h0[45]_/.test(database)) {
-    throw new Error(`Refusing operation: la base '${database}' no es una base QA H04/H05 aislada.`);
+  if (!/^youngkingz_h0[456]_/.test(database)) {
+    throw new Error(`Refusing operation: la base '${database}' no es una base QA H04/H05/H06 aislada.`);
   }
   const url = new URL(ADMIN_URL);
   if (!LOOPBACK.test(url.hostname)) {
@@ -134,8 +134,8 @@ async function main(): Promise<void> {
   const args = parseArguments(process.argv.slice(2));
   await assertIsolatedTarget(root, args.database);
   if (args.template) {
-    if (!/^youngkingz_h0[45]_/.test(args.template)) {
-      throw new Error(`Refusing operation: la plantilla '${args.template}' no es una base QA H04/H05 aislada.`);
+    if (!/^youngkingz_h0[456]_/.test(args.template)) {
+      throw new Error(`Refusing operation: la plantilla '${args.template}' no es una base QA H04/H05/H06 aislada.`);
     }
     await cloneDatabase(args.template, args.database);
   } else {

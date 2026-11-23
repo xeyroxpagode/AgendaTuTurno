@@ -1,0 +1,37 @@
+/* H06 · estilos compartidos de Orders. Sin pestaña nueva: se ancla bajo Inventario. */
+.ord-workspace{display:flex;flex-direction:column;gap:1rem;padding:.25rem 0 2rem}
+.ord-header{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.ord-header h2{font-size:1.25rem;margin:0}
+.ord-filter select,.ord-secondary button{font:inherit}
+.ord-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:1rem;align-items:start}
+.ord-list{display:flex;flex-direction:column;gap:.5rem}
+.ord-row{display:grid;grid-template-columns:1fr auto;gap:.25rem .75rem;text-align:left;padding:.85rem;border:1px solid #d8d8d8;border-radius:12px;background:#fff;cursor:pointer;font:inherit}
+.ord-row:hover,.ord-row.is-active{border-color:#7b3ff2;box-shadow:0 0 0 2px #7b3ff222}
+.ord-row strong{grid-column:1}
+.ord-row small{color:#555;font-variant-numeric:tabular-nums}
+.ord-amount{font-variant-numeric:tabular-nums;text-align:right}
+.ord-badge{justify-self:end;border-radius:999px;padding:.2rem .6rem;font-size:.72rem;font-weight:600;background:#eee;color:#333}
+.ord-requested{background:#fff3cd;color:#6b4e00}
+.ord-confirmed{background:#d9ecff;color:#0b4f8a}
+.ord-preparing{background:#e7dcff;color:#4a2c8a}
+.ord-ready{background:#d6f5e3;color:#11653b}
+.ord-delivered{background:#d3f0d0;color:#155e1a}
+.ord-rejected,.ord-cancelled{background:#f8d7da;color:#842029}
+.ord-detail{border:1px solid #d8d8d8;border-radius:14px;background:#fff;padding:1rem;display:flex;flex-direction:column;gap:.75rem}
+.ord-detail header{display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+.ord-detail h3{margin:0;font-size:1.05rem}
+.ord-lines{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.4rem}
+.ord-lines li{display:grid;grid-template-columns:1fr auto auto;gap:.75rem;align-items:center;border-bottom:1px solid #eee;padding-bottom:.35rem;font-size:.9rem}
+.ord-lines small{display:block;color:#777}
+.ord-total{margin:0;display:flex;justify-content:space-between;font-size:1rem}
+.ord-meta{margin:0;color:#666;font-size:.78rem;font-variant-numeric:tabular-nums}
+.ord-primary{width:100%}
+.ord-secondary{display:flex;flex-wrap:wrap;gap:.5rem}
+.ord-banner{padding:.7rem 1rem;border-radius:10px;background:#f8d7da;color:#842029}
+.ord-ok{background:#d6f5e3;color:#11653b}
+.ord-muted{color:#666;font-size:.85rem}
+.ord-audit{border-top:1px solid #eee;padding-top:.5rem;max-height:14rem;overflow:auto}
+.ord-audit h4{margin:.25rem 0;font-size:.9rem}
+.ord-audit p{margin:.25rem 0;font-size:.8rem;color:#444}
+@media (max-width:900px){.ord-grid{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){.ord-row,.ord-primary{transition:none}}

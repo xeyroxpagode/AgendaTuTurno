@@ -45,9 +45,25 @@ export type CheckoutAuthority = {
   actorAccountId: string;
 };
 
+/**
+ * H06 · autoridad de ejecución de UN pedido ya validado. Es un dato de
+ * SERVIDOR revalidado contra PostgreSQL dentro de la transacción. No concede
+ * `inventory.operate`: la capability que se revalida es la del comando H06
+ * (`orders.confirm`, `orders.cancel`, …) y queda ligada a `order:<id>`.
+ */
+export type OrderAuthority = {
+  orderId: string;
+  businessId: string;
+  operationId: string;
+  expectedSourceReference: string;
+  actorAccountId: string;
+  capability: "orders.confirm" | "orders.cancel" | "orders.cancel_confirmed" | "orders.ready" | "orders.deliver";
+};
+
 export type ExecutionAuthority =
   | { kind: "ACTOR" }
-  | { kind: "CHECKOUT"; checkoutAuth: CheckoutAuthority };
+  | { kind: "CHECKOUT"; checkoutAuth: CheckoutAuthority }
+  | { kind: "ORDER"; orderAuth: OrderAuthority };
 
 const commitmentInput = inventoryLineSchema.extend({ sourceReference:z.string().trim().min(3).max(200) }).strict();
 
@@ -62,6 +78,17 @@ const commitmentInput = inventoryLineSchema.extend({ sourceReference:z.string().
  */
 async function assertExecutionAuthority(tx:Tx,actor:Actor,operationId:string,authority:ExecutionAuthority|undefined):Promise<void>{
   if(!authority||authority.kind==="ACTOR"){requireInventory(actor,'inventory.operate');return;}
+  if(authority.kind==="ORDER"){
+    const auth=authority.orderAuth;
+    if(auth.businessId!==actor.businessId)throw new DomainError("COMMITMENT_BUSINESS_MISMATCH","La autoridad del pedido no pertenece a este negocio",403);
+    if(auth.actorAccountId!==actor.accountId)throw new DomainError("ORDER_NOT_OWNED","La autoridad del pedido no corresponde al operador",403);
+    const [order]=await tx`select id,operation_id "operationId",status::text status from orders.product_orders where business_id=${actor.businessId} and id=${auth.orderId} for update`;
+    if(!order)throw new DomainError("ORDER_NOT_FOUND","El pedido no existe en este negocio",404);
+    if(String(order.operationId)!==auth.operationId)throw new DomainError("ORDER_NOT_OWNED","La autoridad no coincide con el pedido",403);
+    if(auth.expectedSourceReference!==`order:${auth.orderId}`)throw new DomainError("ORDER_NOT_OWNED","La referencia causal del pedido no es válida",403);
+    await assertActorStillAuthorized(tx,actor,auth.capability);
+    return;
+  }
   const auth=authority.checkoutAuth;
   if(auth.businessId!==actor.businessId)throw new DomainError("COMMITMENT_BUSINESS_MISMATCH","La autoridad de checkout no pertenece a este negocio",403);
   if(auth.actorAccountId!==actor.accountId)throw new DomainError("CHECKOUT_AUTH_INVALID","La autoridad de checkout no corresponde al operador",403);
@@ -91,6 +118,7 @@ async function assertLineMatchesCheckoutSale(tx:Tx,actor:Actor,checkoutSaleId:st
 export async function confirmStockCommitment(tx:Tx,actor:Actor,operationId:string,body:unknown,authority?:ExecutionAuthority){
   await assertExecutionAuthority(tx,actor,operationId,authority);
   const v=commitmentInput.parse(body);
+  if(authority?.kind==="ORDER"&&v.sourceReference!==authority.orderAuth.expectedSourceReference)throw new DomainError("ORDER_NOT_OWNED","La línea no pertenece a la referencia causal del pedido",403);
   await lockInventory(tx,actor.businessId);const i=await item(tx,actor,v.sku);await location(tx,actor,v.locationId);
   if(v.purpose!=='SALE'||i.use==='INTERNAL')throw conflict("El compromiso requiere unidades para venta");
   if(authority?.kind==="CHECKOUT"){
@@ -110,6 +138,28 @@ export async function releaseStockCommitment(tx:Tx,actor:Actor,id:string){
   if(c.state==='ACTIVE')await tx`update inventory.commitments set state='RELEASED',revision=revision+1 where id=${id}`;
   return {commitmentId:id,state:'RELEASED'};
 }
+/**
+ * H06 · liberación MULTILÍNEA simétrica con autoridad ORDER. Usa el Tx del
+ * llamador (misma transacción que `order.cancel`), exige el conjunto completo
+ * de compromisos de la referencia causal y nunca toca movimientos físicos.
+ * El camino `ACTOR` de `releaseStockCommitment` permanece intacto.
+ */
+export async function releaseStockCommitments(tx:Tx,actor:Actor,ids:string[],operationId:string,authority?:ExecutionAuthority){
+  await assertExecutionAuthority(tx,actor,operationId,authority);
+  if(!ids.length||ids.length>50||new Set(ids).size!==ids.length)throw conflict('Seleccioná el conjunto completo de compromisos');
+  await lockInventory(tx,actor.businessId);
+  const rows=await tx`select id,state,source_reference "sourceReference" from inventory.commitments where business_id=${actor.businessId} and id=any(${ids}) order by id`;
+  if(rows.length!==ids.length)throw missing();
+  if(rows.every(c=>c.state==='RELEASED'))return {releasedIds:ids,state:'RELEASED' as const};
+  if(rows.some(c=>c.state!=='ACTIVE'))throw conflict('Sólo se pueden liberar compromisos activos');
+  const sources=new Set(rows.map(c=>String(c.sourceReference)));if(sources.size!==1)throw conflict('Las líneas deben pertenecer a la misma referencia causal');
+  if(authority?.kind==="ORDER"&&String(rows[0]!.sourceReference)!==authority.orderAuth.expectedSourceReference)throw new DomainError("ORDER_NOT_OWNED","Los compromisos no pertenecen a este pedido",403);
+  const outstanding=await tx`select id from inventory.commitments where business_id=${actor.businessId} and source_reference=${rows[0]!.sourceReference} and state='ACTIVE'`;
+  if(outstanding.length!==rows.length)throw conflict('V1 requiere liberar el conjunto completo de compromisos');
+  await tx`update inventory.commitments set state='RELEASED',revision=revision+1 where business_id=${actor.businessId} and id=any(${ids})`;
+  return {releasedIds:ids,state:'RELEASED' as const};
+}
+
 export async function deliverStockCommitment(tx:Tx,actor:Actor,id:string,operationId:string,quantity:number,authority?:ExecutionAuthority){
   await assertExecutionAuthority(tx,actor,operationId,authority);
   positiveStockQuantity.parse(quantity);await lockInventory(tx,actor.businessId);
@@ -148,6 +198,10 @@ export async function deliverStockCommitments(tx:Tx,actor:Actor,ids:string[],ope
   if(rows.every(c=>c.state==='DELIVERED')&&new Set(rows.map(c=>c.delivery_movement_id)).size===1)return {movementId:String(rows[0]!.delivery_movement_id),state:'DELIVERED'};
   if(rows.some(c=>c.state!=='ACTIVE'))throw conflict('V1 requiere la entrega completa, sin compromisos liberados o ya entregados');
   const sources=new Set(rows.map(c=>c.source_reference));if(sources.size!==1)throw conflict('Las líneas deben pertenecer a la misma referencia causal');
+  // T-27: la autoridad CHECKOUT/ORDER debe coincidir con la referencia de TODAS
+  // las líneas, no sólo con que todas compartan una referencia entre sí.
+  if(authority?.kind==="CHECKOUT"&&String(rows[0]!.source_reference)!==authority.checkoutAuth.sourceReference)throw new DomainError("CHECKOUT_AUTH_INVALID","Los compromisos no pertenecen a este checkout",403);
+  if(authority?.kind==="ORDER"&&String(rows[0]!.source_reference)!==authority.orderAuth.expectedSourceReference)throw new DomainError("ORDER_NOT_OWNED","Los compromisos no pertenecen a este pedido",403);
   const outstanding=await tx`select id from inventory.commitments where business_id=${actor.businessId} and source_reference=${rows[0]!.source_reference}`;
   if(outstanding.length!==rows.length)throw conflict('V1 no permite entregar sólo parte de las líneas de la referencia');
   if(authority?.kind==="CHECKOUT"){

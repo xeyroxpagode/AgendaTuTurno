@@ -19,7 +19,10 @@ describe("H05 BD, migraciones y seguridad (F43–F45)", () => {
   it("F43 · cadena H01→H05 aplicada en QA aislado", async () => {
     const versions = await database.client`select version from supabase_migrations.schema_migrations order by version`;
     expect(versions.length).toBeGreaterThanOrEqual(18);
-    expect(String(versions.at(-1)!.version)).toBe("202611160001");
+    // FIXTURE G01/CIERRE: la cadena H01→H05 debe estar presente; H06 puede
+    // añadir migraciones posteriores sin que eso sea una regresión H05.
+    expect(versions.some((row) => String(row.version) === "202611160001")).toBe(true);
+    expect(String(versions.at(-1)!.version) >= "202611160001").toBe(true);
   });
 
   it("F43 · ruta de upgrade H04→H05 verificada en base clon", async () => {

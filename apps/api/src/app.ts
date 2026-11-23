@@ -28,15 +28,16 @@ import { registerCashRoutes } from "./modules/cash/routes.js";
 import { registerObligationsRoutes } from "./modules/obligations/routes.js";
 import { registerCheckoutRoutes } from "./modules/checkout/routes.js";
 import { registerCorrectionsRoutes } from "./modules/corrections/routes.js";
+import { registerOrdersRoutes } from "./modules/orders/routes.js";
 import "./plugins/auth.js";
 
 const uuidParam = z.object({ id: z.string().uuid() });
 const operationParam = z.object({ operationId: z.string().uuid() });
 
 export async function buildApp(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: { redact: ["req.headers.authorization", "req.headers.cookie", "req.headers.x-guest-token", "req.headers.x-intent-proof", "req.body.token", "req.body.password", "req.body.currentPassword", "req.body.newPassword", "req.body.recoveryCode", "req.body.code", "req.body.intentProof", "body.token", "body.password"] }, trustProxy: true });
-  await app.register(cors, { origin: (origin, cb) => { const allowlist = runtime.corsAllowlist; if (!origin || allowlist.includes(origin)) { cb(null, true); } else { cb(new Error("CORS policy"), false); } }, credentials: true, methods: ["GET","HEAD","POST","PATCH","PUT","DELETE","OPTIONS"], allowedHeaders: ["authorization","content-type","x-operation-id","x-intent-proof","x-guest-token"] });
-  await app.register(swagger, { openapi: { info: { title: "YoungKingZ API", version: "2.5.0", description: "Authoritative IAM, Staff, Catalog, CRM, Client Identity, Availability, Booking, Absence and Attendance API" }, servers: [{ url: "http://127.0.0.1:4100" }], tags: [{name:"system"},{name:"iam"},{name:"team"},{name:"catalog"},{name:"professionals"},{name:"schedules"},{name:"staff-services"},{name:"clients"},{name:"client-auth"},{name:"availability"},{name:"booking"},{name:"absence"},{name:"attendance"}] } });
+  const app = Fastify({ logger: { redact: ["req.headers.authorization", "req.headers.cookie", "req.headers.x-guest-token", "req.headers.x-intent-proof", "req.headers.x-order-credential", "req.body.token", "req.body.password", "req.body.currentPassword", "req.body.newPassword", "req.body.recoveryCode", "req.body.code", "req.body.intentProof", "body.token", "body.password"] }, trustProxy: true });
+  await app.register(cors, { origin: (origin, cb) => { const allowlist = runtime.corsAllowlist; if (!origin || allowlist.includes(origin)) { cb(null, true); } else { cb(new Error("CORS policy"), false); } }, credentials: true, methods: ["GET","HEAD","POST","PATCH","PUT","DELETE","OPTIONS"], allowedHeaders: ["authorization","content-type","x-operation-id","x-intent-proof","x-guest-token","x-order-credential"] });
+  await app.register(swagger, { openapi: { info: { title: "YoungKingZ API", version: "2.5.0", description: "Authoritative IAM, Staff, Catalog, CRM, Client Identity, Availability, Booking, Absence and Attendance API" }, servers: [{ url: "http://127.0.0.1:4100" }], tags: [{name:"system"},{name:"iam"},{name:"team"},{name:"catalog"},{name:"professionals"},{name:"schedules"},{name:"staff-services"},{name:"clients"},{name:"client-auth"},{name:"availability"},{name:"booking"},{name:"absence"},{name:"attendance"},{name:"orders"}] } });
   await app.register(swaggerUi, { routePrefix: "/docs" });
 
   app.setErrorHandler((error, _request, reply) => {
@@ -123,5 +124,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerObligationsRoutes(app);
   await registerCheckoutRoutes(app);
   await registerCorrectionsRoutes(app);
+  await registerOrdersRoutes(app);
   return app;
 }

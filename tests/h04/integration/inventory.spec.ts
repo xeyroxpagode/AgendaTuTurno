@@ -65,7 +65,9 @@ describe('H04 real PostgreSQL acceptance',()=>{
   });
   it('physical returns require fitness and causal reference; issues do not affect finances',async()=>{
     await move('RETURN','RAZOR',shared,1,{sourceReference:'Retorno físico documentado',fitForUse:true});await move('ISSUE','RAZOR',shared,1,{sourceReference:'Entrega operativa autorizada'});
-    const [r]=await database.client`select to_regclass('sales.sales') sale,to_regclass('finance.expenses') expense`;expect(r!.sale).toBeNull();expect(r!.expense).toBeNull();
+    // FIXTURE CIERRE H06: la ausencia de `sales.sales` no es un oráculo H04;
+    // H05/H06 pueden estar presentes. El oráculo es que no se crea efecto financiero.
+    const [r]=await database.client`select to_regclass('finance.expenses') expense`;expect(r!.expense).toBeNull();
   });
   it('mixed-use reallocation preserves total and location independently',async()=>{
     await cmd.createItem(owner,itemBody('MIXED','MIXED'),randomUUID());await cmd.createMovement(owner,{kind:'OPENING',lines:[{sku:'MIXED',locationId:shared,purpose:'SALE',quantity:5}],reason:'Recuento inicial',effectiveAt:now()},randomUUID());

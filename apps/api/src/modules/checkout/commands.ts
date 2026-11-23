@@ -31,15 +31,61 @@ import { confirmStockCommitments, deliverStockCommitments } from "../inventory/c
  * actor real para auditoría.
  */
 
-export async function createCheckout(actor: Actor, body: unknown, operationId: string) {
+/**
+ * Parámetros INTERNOS server-to-server (T-05/T-08, CORR-04). Nunca se leen
+ * del body HTTP: `sourceReference` se deriva en servidor desde un pedido
+ * validado y `reuseCommitments` se decide por la existencia de compromisos
+ * ACTIVOS de ese pedido, jamás por un flag del cliente.
+ */
+export type CheckoutInternal = {
+  sourceReference?: string;
+  reuseCommitments?: boolean;
+};
+
+/** Igualdad agregada (sku, location_id, sum(quantity)) sin segunda reserva. */
+async function assertReusedCommitments(
+  tx: Parameters<typeof productLinesOf>[0],
+  businessId: string,
+  sourceReference: string,
+  productLines: Array<{ sku: string; locationId: string; quantity: number }>
+): Promise<string[]> {
+  const rows = await tx`
+    select id, sku, location_id "locationId", quantity::int quantity
+      from inventory.commitments
+     where business_id = ${businessId} and source_reference = ${sourceReference}
+       and state = 'ACTIVE' for update`;
+  const actual = new Map<string, number>();
+  for (const row of rows) {
+    const key = `${String(row.sku)}|${String(row.locationId)}`;
+    actual.set(key, (actual.get(key) ?? 0) + Number(row.quantity));
+  }
+  const expected = new Map<string, number>();
+  for (const line of productLines) {
+    const key = `${line.sku}|${line.locationId}`;
+    expected.set(key, (expected.get(key) ?? 0) + line.quantity);
+  }
+  if (actual.size !== expected.size) throw new DomainError("DELIVERY_SKU_MISMATCH", "Los compromisos no coinciden con las líneas de la venta", 409);
+  for (const [key, quantity] of expected) {
+    if (actual.get(key) !== quantity) throw new DomainError("DELIVERY_QUANTITY_MISMATCH", "La cantidad comprometida no coincide con la venta", 409);
+  }
+  return rows.map((row) => String(row.id));
+}
+
+export async function createCheckout(actor: Actor, body: unknown, operationId: string, internal?: CheckoutInternal) {
   requireCapability(actor, "checkout.create");
   const input = createCheckoutSchema.parse(body);
   assertExternalEvidence(input.components as MoneyComponent[]);
   const checkoutId = randomUUID();
+  // Origen de verdad del sourceReference: servidor. El valor interno sólo
+  // puede ser una referencia `order:<uuid-v4>`; nunca viene del request HTTP.
+  const supplied = internal?.sourceReference;
+  if (supplied !== undefined && !/^order:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(supplied)) {
+    throw new DomainError("VALIDATION_ERROR", "sourceReference interno inválido", 400);
+  }
 
   const prepared = await executeOperation({
     actor, operationId, command: "checkout.create",
-    payload: { ...input, checkoutId }
+    payload: { ...input, checkoutId, internal: internal ?? null }
   }, async (tx) => {
     await lockBusiness(tx, actor.businessId);
     await assertActorStillAuthorized(tx, actor, "checkout.create");
@@ -64,7 +110,7 @@ export async function createCheckout(actor: Actor, body: unknown, operationId: s
     const components = input.components as MoneyComponent[];
     const moneyStatus = deriveOperationStatus(components);
     const confirmedMinor = sumConfirmedAmounts(components);
-    const sourceReference = `checkout:${checkoutId}`;
+    const sourceReference = supplied ?? `checkout:${checkoutId}`;
     const [checkout] = await tx`
       insert into checkout.checkouts(id,business_id,operation_id,sale_id,status,total_minor,confirmed_minor,source_reference,actor_account_id)
       values (${checkoutId},${actor.businessId},${operationId},${input.saleId},'PENDING',${totalMinor},${confirmedMinor},${sourceReference},${actor.accountId})
@@ -88,16 +134,22 @@ export async function createCheckout(actor: Actor, body: unknown, operationId: s
 
     // 3 · Reserva física: dentro de la MISMA transacción que el dinero. Si el
     // stock no alcanza, esta transacción se revierte y no se cobró nada.
+    // H06 (reuseCommitments=true): NO se reserva de nuevo; se valida la
+    // igualdad agregada de los compromisos ACTIVOS del pedido (T-05/T-43).
     const productLines = await productLinesOf(tx, actor.businessId, input.saleId);
     let commitmentIds: string[] = [];
     if (productLines.length) {
-      const authority = issueCheckoutAuthority({
-        id: checkoutId, businessId: actor.businessId, operationId, sourceReference
-      }, actor);
-      const commitments = await confirmStockCommitments(tx, actor, operationId, productLines.map((line) => ({
-        sku: line.sku, locationId: line.locationId, purpose: "SALE", quantity: line.quantity, sourceReference
-      })), { kind: "CHECKOUT", checkoutAuth: authority });
-      commitmentIds = commitments.map((commitment) => commitment.commitmentId);
+      if (internal?.reuseCommitments && supplied) {
+        commitmentIds = await assertReusedCommitments(tx, actor.businessId, supplied, productLines);
+      } else {
+        const authority = issueCheckoutAuthority({
+          id: checkoutId, businessId: actor.businessId, operationId, sourceReference
+        }, actor);
+        const commitments = await confirmStockCommitments(tx, actor, operationId, productLines.map((line) => ({
+          sku: line.sku, locationId: line.locationId, purpose: "SALE", quantity: line.quantity, sourceReference
+        })), { kind: "CHECKOUT", checkoutAuth: authority });
+        commitmentIds = commitments.map((commitment) => commitment.commitmentId);
+      }
     }
 
     const nextStatus = confirmedMinor >= totalMinor

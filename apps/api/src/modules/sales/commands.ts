@@ -18,7 +18,10 @@ import { checkRevision, conflict, lockBusiness, requireCapability } from "../h05
  *              reescriben).
  */
 
-export async function createSale(actor: Actor, body: unknown, operationId: string) {
+/** Parámetro INTERNO server-to-server (G01/D16). Nunca se lee del body HTTP. */
+export type SaleInternal = { confirmedOrderId?: string };
+
+export async function createSale(actor: Actor, body: unknown, operationId: string, internal?: SaleInternal) {
   requireCapability(actor, "sales.create");
   const input = createSaleSchema.parse(body);
   assertDiscountAuthority(actor, input.lines);
@@ -27,10 +30,11 @@ export async function createSale(actor: Actor, body: unknown, operationId: strin
     actor,
     operationId,
     command: "sale.create",
-    payload: input
+    payload: { ...input, internal: internal ?? null }
   }, async (tx) => {
     await lockBusiness(tx, actor.businessId);
-    const resolved = await resolveSaleLines(tx, actor, input);
+    const resolved = await resolveSaleLines(tx, actor, input,
+      internal?.confirmedOrderId ? { confirmedOrderId: internal.confirmedOrderId } : undefined);
     assertDiscountAuthority(actor, resolved.lines);
     const total = saleTotal(resolved.lines);
 
