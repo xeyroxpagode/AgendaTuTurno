@@ -1,5 +1,5 @@
 import type { Actor } from "../iam/authorization.js";
-import { DomainError } from "@youngkingz/contracts";
+import { DomainError, grantableCapabilitiesByRole, roleCapabilities, type Capability, type RoleCode } from "@youngkingz/contracts";
 import { stableHash } from "../../lib/crypto.js";
 import { database } from "../../lib/runtime.js";
 import type { TransactionSql } from "postgres";
@@ -255,6 +255,63 @@ export async function durableAttemptState(operationId: string, actor: Actor): Pr
 export async function audit(tx: Tx, input: { actor: Actor; operationId: string; action: string; capability: string; resourceType: string; resourceId?: string; changes?: object; outcome?: string }) {
   await tx`insert into system.audit_events(business_id,actor_account_id,operation_id,action,capability,scope,resource_type,resource_id,outcome,changes)
     values (${input.actor.businessId},${input.actor.accountId},${input.operationId},${input.action},${input.capability},${JSON.stringify({type:"BUSINESS",businessId:input.actor.businessId})}::jsonb,${input.resourceType},${input.resourceId ?? null},${input.outcome ?? "SUCCEEDED"},${JSON.stringify(input.changes ?? {})}::jsonb)`;
+}
+
+/**
+ * H01/H07/H08 · Revalidación transaccional de autoridad.
+ *
+ * DEBE invocarse dentro de la transacción, inmediatamente antes del commit de
+ * cualquier mutación H07/H08. Comprueba, con bloqueo `FOR SHARE`:
+ *   1. que el actor pertenece al Business (`business_id`, `account_id`) y su
+ *      vínculo StaffMember sigue ACTIVO — la DB por sí sola acepta actores
+ *      cruzados (hallazgo B-03);
+ *   2. que el rol y la sesión operativa siguen vigentes (revocación en vuelo);
+ *   3. que la capability sigue disponible por rol O por grant vigente;
+ *   4. que el scope `staffMemberId` del grant coincide con el recurso.
+ *
+ * Nunca se delega esta comprobación al frontend ni a RLS: el backend usa
+ * service_role y RLS está habilitado sin policies.
+ */
+export async function revalidateAuthority(tx: Tx, actor: Actor, capability: Capability, scope?: { staffMemberId?: string }): Promise<void> {
+  const identity = await tx`
+    select 1 from team.staff_members sm
+    join iam.user_accounts ua on ua.person_id = sm.person_id
+    where sm.id = ${actor.staffMemberId} and sm.business_id = ${actor.businessId}
+      and ua.id = ${actor.accountId} and sm.access_status = 'ACTIVE'
+      and sm.employment_status <> 'INACTIVE'
+    for share of sm, ua`;
+  if (!identity.length) throw new DomainError("FORBIDDEN", "Authority is no longer valid for this business", 403);
+
+  const roleRows = await tx`
+    select ra.id, ra.role::text role from iam.role_assignments ra
+    where ra.id = ${actor.roleAssignmentId} and ra.business_id = ${actor.businessId}
+      and ra.staff_member_id = ${actor.staffMemberId}
+      and ra.revoked_at is null and ra.effective_at is not null
+    for share`;
+  if (!roleRows.length) throw new DomainError("FORBIDDEN", "Role assignment was revoked", 403);
+
+  const sessionRows = await tx`
+    select id from iam.access_sessions
+    where id = ${actor.accessSessionId} and business_id = ${actor.businessId}
+      and account_id = ${actor.accountId} and revoked_at is null
+    for share`;
+  if (!sessionRows.length) throw new DomainError("SESSION_REVOKED", "Operational session was revoked", 401);
+
+  const role = roleRows[0]!.role as RoleCode;
+  if (roleCapabilities[role].includes(capability)) return;
+
+  if (!grantableCapabilitiesByRole[role].includes(capability)) throw new DomainError("FORBIDDEN", `Capability ${capability} is not grantable to this role`, 403);
+  const grantRows = await tx`
+    select scope from iam.capability_grants
+    where business_id = ${actor.businessId} and staff_member_id = ${actor.staffMemberId}
+      and role_assignment_id = ${actor.roleAssignmentId} and capability = ${capability}
+      and revoked_at is null and valid_from <= now()
+      and (expires_at is null or expires_at > now())
+    for share`;
+  if (!grantRows.length) throw new DomainError("FORBIDDEN", `Missing capability: ${capability}`, 403);
+  if (scope?.staffMemberId && !grantRows.some((grant) => (grant.scope as { staffMemberId?: string } | null)?.staffMemberId === scope.staffMemberId)) {
+    throw new DomainError("ECONOMY_FORBIDDEN", `Capability ${capability} is not granted for the requested professional`, 403);
+  }
 }
 
 export function operationId(headers: Record<string, unknown>): string {

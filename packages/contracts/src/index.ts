@@ -95,7 +95,18 @@ export const capabilities = [
   // `inventory.operate` NO se concede: H04 usa autoridad específica ORDER.
   "orders.read", "orders.create", "orders.confirm", "orders.reject",
   "orders.prepare", "orders.ready", "orders.cancel", "orders.deliver",
-  "orders.cancel_confirmed", "orders.exception.resolve", "orders.credential.reissue"
+  "orders.cancel_confirmed", "orders.exception.resolve", "orders.credential.reissue",
+  // ─────────────────────────────────────────────────────────────────────────
+  // H07 · CAP-07-01..05 · Cursos (DISCOVERY_ONLY para el cliente).
+  // La escritura de ocupación se resuelve en servidor sobre el motor único
+  // de Agenda; ninguna capability habilita inscripción, matrícula ni pago.
+  "courses.read", "courses.manage", "courses.publish", "courses.sessions.manage",
+  // ─────────────────────────────────────────────────────────────────────────
+  // H08 · CAP-08-01..06 · Economía del personal.
+  // `economy.self.read` es el único acceso económico del BARBER (CL-13) y
+  // SIEMPRE se resuelve con scope staffMemberId == actor.staffMemberId.
+  "economy.agreements.manage", "economy.estimate.read", "economy.settlement.read",
+  "economy.settlement.close", "economy.payment.manage", "economy.self.read"
 ] as const;
 export const capabilitySchema = z.enum(capabilities);
 export type Capability = z.infer<typeof capabilitySchema>;
@@ -118,6 +129,10 @@ export const delegableCapabilities: readonly Capability[] = [
   // H06 · sólo operaciones sensibles de pedidos se delegan por grant expreso
   // (C01 §10.1). Las ordinarias son base de OWNER/RECEPTIONIST.
   ,"orders.read", "orders.cancel_confirmed", "orders.exception.resolve", "orders.credential.reissue"
+  // H07/H08 · operaciones sensibles delegan por grant expreso (con scope).
+  ,"courses.read", "courses.manage", "courses.publish", "courses.sessions.manage"
+  ,"economy.agreements.manage", "economy.estimate.read", "economy.settlement.read"
+  ,"economy.settlement.close", "economy.payment.manage"
 ];
 
 /**
@@ -166,7 +181,18 @@ export const updateStaffSchema = z.object({ firstName: z.string().trim().min(1).
 export const updateRolesSchema = z.object({ roles: z.array(roleSchema).max(3), revision: z.number().int().positive(), sensitiveConfirmation: z.string().optional() });
 export const issueInvitationSchema = z.object({ email: z.string().email() });
 export const acceptInvitationSchema = z.object({ token: z.string().min(32) });
-export const grantSchema = z.object({ capability: capabilitySchema, expiresAt: z.string().datetime().optional(), roleAssignmentId: z.string().uuid() });
+/**
+ * H08 · CL-13 · Scope efectivo de un grant.
+ *
+ * `staffMemberId` restringe la autoridad conferida a un único profesional del
+ * Business. Un grant sin scope es de Business completo. El scope se evalúa en
+ * `AuthorizationService.require()` y se REVALIDA dentro de la transacción
+ * inmediatamente antes del commit (`revalidateAuthority`). El frontend nunca
+ * puede ampliarlo: el frontend no envía actor, businessId ni scope.
+ */
+export const grantScopeSchema = z.object({ staffMemberId: z.string().uuid().optional() }).strict();
+export type GrantScope = z.infer<typeof grantScopeSchema>;
+export const grantSchema = z.object({ capability: capabilitySchema, expiresAt: z.string().datetime().optional(), roleAssignmentId: z.string().uuid(), scope: grantScopeSchema.optional() });
 export const contextSwitchSchema = z.object({ roleAssignmentId: z.string().uuid(), revision: z.number().int().nonnegative() });
 export const lifecycleSchema = z.object({ revision: z.number().int().positive(), reason: z.string().trim().min(3).max(500) });
 export const terminateSessionsSchema = z.object({ scope: z.enum(["CURRENT", "OTHERS", "ALL"]), sessionId: z.string().uuid().optional() });
@@ -209,7 +235,21 @@ export type DomainErrorCode = "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "V
   | "ORDER_NOT_FOUND" | "ORDER_STATE_INVALID" | "ORDER_NOT_OWNED"
   | "INCOMPLETE_COMMITMENT_SET" | "ORDER_CREDENTIAL_INVALID" | "ORDER_CREDENTIAL_REVOKED"
   | "MONEY_BLOCKS_CANCEL" | "ORDER_EXCEPTION_NOT_AUTHORIZED" | "ORDER_ALREADY_DELIVERED"
-  | "BUSINESS_NOT_FOUND";
+  | "BUSINESS_NOT_FOUND"
+  // ─────────────────────────────────────────────────────────────────────────
+  // H07 · Cursos. Los errores de Agenda se traducen desde SQLSTATE
+  // (23P01/23505/22000) a SLOT_CONFLICT/INVALID_INTERVAL; se conservan los
+  // códigos existentes y se agregan los específicos del dominio Course.
+  | "COURSE_NOT_FOUND" | "COURSE_NOT_PUBLISHED" | "SESSION_NOT_FOUND"
+  | "SESSION_STATE_INVALID" | "INSTRUCTOR_NOT_ELIGIBLE" | "INVALID_INTERVAL"
+  | "SESSION_ALLOCATION_MISSING" | "ALLOCATION_RELEASE_CONFLICT"
+  // ─────────────────────────────────────────────────────────────────────────
+  // H08 · Economía del personal. `NOT_CONFIGURED` es un estado de dato
+  // (acuerdo incompleto/inexistente), NUNCA un importe cero ni un fallback.
+  | "AGREEMENT_NOT_FOUND" | "NOT_CONFIGURED" | "AGREEMENT_OVERLAP"
+  | "ECONOMY_FORBIDDEN" | "SETTLEMENT_CONFLICT" | "SOURCE_ALREADY_SETTLED"
+  | "PERIOD_INVALID" | "AMOUNT_OUT_OF_RANGE" | "SNAPSHOT_IMMUTABLE"
+  | "ADJUSTMENT_INVALID" | "OBLIGATION_KIND_INVALID";
 export class DomainError extends Error { constructor(public readonly code: DomainErrorCode, message: string, public readonly statusCode = 400, public readonly details?: unknown) { super(message); } }
 
 export const roleCapabilities: Readonly<Record<RoleCode, readonly Capability[]>> = {
@@ -240,7 +280,12 @@ export const roleCapabilities: Readonly<Record<RoleCode, readonly Capability[]>>
     // requieren grant explícito y, en el segundo caso, rol OWNER.
     "orders.read", "orders.create", "orders.confirm", "orders.reject",
     "orders.prepare", "orders.ready", "orders.cancel", "orders.deliver",
-    "orders.credential.reissue"],
+    "orders.credential.reissue",
+    // H07 · operación de cursos y sesiones (siempre sobre el motor de Agenda).
+    "courses.read", "courses.manage", "courses.publish", "courses.sessions.manage",
+    // H08 · consulta y pago; la CONFIGURACIÓN de acuerdos y el CIERRE son
+    // sensibles y requieren grant expreso (delegableCapabilities).
+    "economy.estimate.read", "economy.settlement.read", "economy.payment.manage"],
   // BARBER · agenda propia y acciones explícitamente autorizadas sobre su ámbito:
   // lee únicamente sus propias reservas (`bookings.self.read`, sin
   // `bookings.read`), y registra llegada / no-show sólo sobre reservas
@@ -253,5 +298,9 @@ export const roleCapabilities: Readonly<Record<RoleCode, readonly Capability[]>>
     // CAP-03-07 · Ausencias: sólo las propias (el alcance se resuelve en servidor).
     "absence.request", "absence.read", "absence.withdraw",
     // CAP-03-08 · Prestación real: sólo la propia (el alcance se resuelve en servidor).
-    "attendance.register", "attendance.read", "attendance.correct", "inventory.read", "inventory.consume"]
+    "attendance.register", "attendance.read", "attendance.correct", "inventory.read", "inventory.consume",
+    // CL-13 · lectura propia de economía. NO otorga acceso a otros
+    // profesionales ni a la economía global: el alcance se restringe en
+    // servidor a actor.staffMemberId y se revalida antes del commit.
+    "economy.self.read"]
 };
