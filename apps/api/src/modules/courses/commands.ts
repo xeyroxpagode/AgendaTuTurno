@@ -44,6 +44,8 @@ export async function updateCourse(actor: Actor, courseId: string, raw: unknown,
         description=case when ${input.description === undefined} then description else ${input.description ?? null} end,
         contact_channel=coalesce(${input.contactChannel ?? null},contact_channel),
         contact_value=case when coalesce(${input.contactChannel ?? null},contact_channel)='NONE' then null
+          when ${input.contactChannel !== undefined} and ${input.contactChannel ?? null} is distinct from contact_channel
+               and ${input.contactValue === undefined} then null
           when ${input.contactValue === undefined} then contact_value else ${input.contactValue ?? null} end,
         revision=revision+1, updated_at=now()
       where business_id=${actor.businessId} and id=${courseId} and revision=${input.revision} returning revision`;
@@ -62,7 +64,8 @@ async function changePublication(actor: Actor, courseId: string, operationId: st
     if (target === "PUBLISHED" && !["DRAFT", "UNPUBLISHED"].includes(String(course.status))) throw new DomainError("SESSION_STATE_INVALID", "Course cannot be published from this state", 409);
     if (target === "UNPUBLISHED" && String(course.status) !== "PUBLISHED") throw new DomainError("SESSION_STATE_INVALID", "Course is not published", 409);
     const [updated] = await tx`
-      update courses.courses set status=${target}, published_at=${target === "PUBLISHED" ? new Date().toISOString() : null},
+      update courses.courses set status=${target},
+        published_at=case when ${target === "PUBLISHED"} then ${new Date().toISOString()}::timestamptz else published_at end,
         revision=revision+1, updated_at=now()
       where business_id=${actor.businessId} and id=${courseId} returning revision`;
     await recordCourseEvent(tx, actor, { courseId, eventType: target, operationId, changes: { from: course.status, to: target } });

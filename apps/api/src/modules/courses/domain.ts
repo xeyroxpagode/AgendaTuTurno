@@ -34,6 +34,28 @@ export async function assertInstructorEligible(tx: Tx, businessId: string, staff
   if (!eligible) throw new DomainError("INSTRUCTOR_NOT_ELIGIBLE", "The instructor is not an active professional of this business", 409, { staffMemberId });
 }
 
+/**
+ * CAP-07-02 · La MISMA elegibilidad que `assertInstructorEligible`, expuesta al
+ * selector de la UI. Antes el frontend consultaba `/v1/professionals`, que no
+ * exige `access_status` y omite a los BARBER sin perfil: podía mostrar como
+ * elegible a quien el backend rechaza y ocultar a quien el backend acepta.
+ */
+export async function eligibleInstructors(businessId: string) {
+  return rows<{ staffMemberId: string; effectiveDisplayName: string }>(sql`
+    select sm.id "staffMemberId",
+           coalesce(pp.professional_display_name, concat_ws(' ', p.first_name, p.last_name)) "effectiveDisplayName"
+    from team.staff_members sm
+    join iam.persons p on p.id=sm.person_id
+    left join team.professional_profiles pp on pp.business_id=sm.business_id and pp.staff_member_id=sm.id and pp.status='ACTIVE'
+    where sm.business_id=${businessId}
+      and sm.access_status='ACTIVE' and sm.employment_status='ACTIVE'
+      and (
+        exists (select 1 from team.professional_profiles pp2 where pp2.business_id=sm.business_id and pp2.staff_member_id=sm.id and pp2.status='ACTIVE')
+        or exists (select 1 from iam.role_assignments ra where ra.business_id=sm.business_id and ra.staff_member_id=sm.id and ra.role='BARBER' and ra.revoked_at is null and ra.effective_at is not null)
+      )
+    order by 2, 1`);
+}
+
 export type LocalSessionInterval = {
   localDate: string;
   startMinute: number;

@@ -40,7 +40,7 @@ try {
   await page.getByLabel("Medio de contacto").selectOption("PHONE");
   const phone = "+54 11 5555-0142";
   await page.getByLabel("Dato de contacto público").pressSequentially(phone);
-  const courseCreation = page.waitForResponse((response) => response.request().method() === "POST" && /\/v1\/courses$/.test(response.url()));
+  const courseCreation = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/v1/courses"));
   await button("Guardar borrador").click();
   const createdResponse = await courseCreation;
   if (!createdResponse.ok()) throw new Error("Crear curso HTTP " + createdResponse.status() + ": " + (await createdResponse.json()).error?.code);
@@ -313,14 +313,28 @@ try {
   steps.push({ ids: [], status: "PASS", observed: { journey: "Reception Agenda shows the course, reservation and allowed arrival action", reservationId, courseDate: occupied } });
   phase = "guest-booking";
   await visitor.getByRole("button", { name: "Mostrar" }).click();
-  const guestToken = await visitor.locator("text=Token privado").locator("xpath=following::span[1]").innerText();
+  const tokenSpan = visitor.locator("text=Token privado").locator("xpath=following::span[1]");
+  await expect(tokenSpan).not.toHaveText(/^•+$/, { timeout: 10000 });
+  const guestToken = (await tokenSpan.innerText()).trim();
+  assert.ok(guestToken.length > 0, "UI no expuso el token de invitado tras Mostrar");
+  const consultStatuses = [];
+  visitor.on("response", (response) => {
+    if (/\/v1\/public\/reservations\/[0-9a-f-]+$/.test(response.url())) consultStatuses.push(response.status());
+  });
   await visitor.getByRole("link", { name: /Mis reservas/ }).click();
-  await visitor.getByLabel("ID de la reserva").fill(reservationId);
-  await visitor.getByLabel("Token de invitado").fill(guestToken);
+  await visitor.getByLabel("ID de la reserva").pressSequentially(reservationId, { delay: 2 });
+  await visitor.getByLabel("Token de invitado").pressSequentially(guestToken, { delay: 2 });
+  await expect(visitor.getByLabel("ID de la reserva")).toHaveValue(reservationId);
+  await expect(visitor.getByLabel("Token de invitado")).toHaveValue(guestToken);
   await visitor.getByRole("button", { name: "Consultar reserva" }).click();
-  await expect(visitor.getByRole("heading", { name: "Reserva " + reservationId })).toBeVisible();
+  try {
+    await expect(visitor.getByRole("heading", { name: "Reserva " + reservationId })).toBeVisible({ timeout: 8000 });
+  } catch (error) {
+    const alertText = await visitor.locator('[role="alert"]').allInnerTexts();
+    throw new Error(`${error.message} | consultStatuses=${JSON.stringify(consultStatuses)} tokenLength=${guestToken.length} tokenPrefix=${guestToken.slice(0, 4)} alerts=${JSON.stringify(alertText)}`);
+  }
   await expect(visitor.getByText(/Estado:.*CONFIRMED/)).toBeVisible();
-  steps.push({ ids: [], status: "PASS", observed: { journey: "Guest SPECIFIC", reservationId, booked, excluded: ["10:00", "10:30"], bookedTime: "11:30", consulted: true } });
+  steps.push({ ids: [], status: "PASS", observed: { journey: "Guest SPECIFIC", reservationId, booked, excluded: ["10:00", "10:30"], bookedTime: "11:30", consulted: true, tokenLength: guestToken.length, consultStatuses } });
 
   assert.equal((await reschedule(occupied, origin)).status(), 200);
   await notice("Sesión reprogramada");
@@ -414,9 +428,12 @@ try {
   await expect(own).toContainText("CONFIRMED");
   await account.screenshot({ path: path.join(out, "08_SCREENSHOTS", "client-account-reservation.png"), fullPage: false });
   await own.getByRole("button", { name: "Reprogramar" }).click();
-  await own.getByRole("button", { name: "14:00", exact: true }).click();
+  const rescheduleSlots = own.getByRole("group", { name: "Horarios disponibles" }).getByRole("button");
+  await expect(rescheduleSlots.first()).toBeVisible({ timeout: 15000 });
+  const chosenSlot = (await rescheduleSlots.first().innerText()).trim();
+  await rescheduleSlots.first().click();
   await own.getByRole("button", { name: "Confirmar reprogramación" }).click();
-  await expect(own).toContainText("14:00");
+  await expect(own).toContainText(chosenSlot);
   account.once("dialog", (dialog) => dialog.accept());
   await own.getByRole("button", { name: "Cancelar", exact: true }).click();
   await expect(own).toContainText("CANCELLED");

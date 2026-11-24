@@ -83,9 +83,16 @@ export async function rescheduleSession(
   // N-11 · un replay no debe devolver un estado obsoleto tras una liberación.
   if (result.replayed) {
     const current = await requireSession(actor.businessId, input.sessionId);
-    return { ...result.data, currentStatus: String(current.status), currentRevision: Number(current.revision) };
+    return {
+      ...result.data,
+      status: String(current.status),
+      revision: Number(current.revision),
+      currentStatus: String(current.status),
+      currentRevision: Number(current.revision),
+      replayed: true
+    };
   }
-  return result.data;
+  return { ...result.data, replayed: false };
 }
 
 export async function cancelSession(actor: Actor, input: { sessionId: string }, operationId: string) {

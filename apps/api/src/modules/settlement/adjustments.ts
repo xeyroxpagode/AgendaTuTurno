@@ -14,8 +14,8 @@ export async function adjustSettlement(actor: Actor, raw: unknown, operationId: 
   return executeOperation({ operationId, command: "settlement.adjust", actor, payload: input }, async (tx) => {
     const [settlement] = await tx`
       select id, staff_member_id "staffMemberId", status, payable_obligation_id "payableObligationId",
-             receivable_obligation_id "receivableObligationId", snapshot
-      from econ.settlements where business_id=${actor.businessId} and id=${input.settlementId}` as unknown as Array<{ id: string; staffMemberId: string; status: string; payableObligationId: string | null; receivableObligationId: string | null; snapshot: unknown }>;
+             receivable_obligation_id "receivableObligationId", closed_at "closedAt", snapshot
+      from econ.settlements where business_id=${actor.businessId} and id=${input.settlementId}` as unknown as Array<{ id: string; staffMemberId: string; status: string; payableObligationId: string | null; receivableObligationId: string | null; closedAt: Date; snapshot: { sources?: Array<{ basis?: { refundOperations?: string[] } }> } }>;
     if (!settlement) throw new DomainError("NOT_FOUND", "Settlement not found", 404);
     authorizationService.require(actor, CAPABILITY, { staffMemberId: settlement.staffMemberId });
 
@@ -23,15 +23,34 @@ export async function adjustSettlement(actor: Actor, raw: unknown, operationId: 
     // entrelazarse con un pago ni dejar el importe por debajo de lo pagado.
     await lockBusiness(tx, actor.businessId);
     if (input.sourceType === "REFUND") {
+      // CL-07 / Q08-27: el ajuste es un HECHO POSTERIOR al cierre. Un reintegro
+      // anterior ya fue descontado en la base COLLECTED del snapshot: aceptarlo
+      // aquí descontaría DOS VECES el mismo dinero.
+      const alreadyInSnapshot = new Set(
+        (settlement.snapshot?.sources ?? []).flatMap((line) => line.basis?.refundOperations ?? [])
+      );
+      if (input.sourceId && alreadyInSnapshot.has(input.sourceId)) {
+        throw new DomainError("ADJUSTMENT_INVALID", "El reintegro ya fue incluido en la liquidación cerrada.", 409);
+      }
       const [cause] = await tx`
         select r.id from money.money_operations r
         join money.money_operations p on p.business_id=r.business_id and p.id=r.refund_of_id
-        join econ.settlement_sources s on s.business_id=r.business_id and s.settlement_id=${input.settlementId}
-          and s.source_type='SALE' and s.source_id=p.sale_id
         where r.business_id=${actor.businessId} and r.id=${input.sourceId ?? null}
-          and r.kind='REFUND' and r.status='SUCCEEDED'`;
+          and r.kind='REFUND' and r.status='SUCCEEDED'
+          and coalesce(r.resolved_at, r.created_at) > ${settlement.closedAt}
+          and (
+            exists (select 1 from econ.settlement_sources s
+                    where s.business_id=r.business_id and s.settlement_id=${input.settlementId}
+                      and s.source_type='SALE' and s.source_id=p.sale_id)
+            or (p.sale_id is null and exists (
+                  select 1 from money.money_allocations ma
+                  join econ.settlement_sources s on s.business_id=ma.business_id
+                    and s.source_type='SALE' and s.source_id=ma.target_id
+                    and s.settlement_id=${input.settlementId}
+                  where ma.business_id=r.business_id and ma.money_operation_id=p.id))
+          )`;
       if (!cause || input.amountMinor > 0 || input.kind !== "PAYABLE") {
-        throw new DomainError("ADJUSTMENT_INVALID", "El reintegro debe estar confirmado y vinculado a una venta de esta liquidación.", 409);
+        throw new DomainError("ADJUSTMENT_INVALID", "El reintegro debe ser posterior al cierre y estar vinculado a una venta de esta liquidación.", 409);
       }
     }
     const obligationId = input.kind === "RECEIVABLE" ? settlement.receivableObligationId : settlement.payableObligationId;

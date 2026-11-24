@@ -282,6 +282,12 @@ export async function revalidateAuthority(tx: Tx, actor: Actor, capability: Capa
     for share of sm, ua`;
   if (!identity.length) throw new DomainError("FORBIDDEN", "Authority is no longer valid for this business", 403);
 
+  // Plantilla de comando: business activo verificado DENTRO de la transacción.
+  // El discovery ya lo hacía; las mutaciones H07/H08 no lo comprobaban.
+  const businessRows = await tx`
+    select 1 from business.businesses where id=${actor.businessId} and status='ACTIVE' for share`;
+  if (!businessRows.length) throw new DomainError("FORBIDDEN", "Business is not active", 403);
+
   const roleRows = await tx`
     select ra.id, ra.role::text role from iam.role_assignments ra
     where ra.id = ${actor.roleAssignmentId} and ra.business_id = ${actor.businessId}
@@ -315,7 +321,8 @@ export async function revalidateAuthority(tx: Tx, actor: Actor, capability: Capa
     const target = (grant.scope as { staffMemberId?: string } | null)?.staffMemberId;
     return !target || target === scope?.staffMemberId;
   })) {
-    throw new DomainError("ECONOMY_FORBIDDEN", `Capability ${capability} is not granted for the requested professional`, 403);
+    const code: import("@youngkingz/contracts").DomainErrorCode = capability.startsWith("economy.") ? "ECONOMY_FORBIDDEN" : "FORBIDDEN";
+    throw new DomainError(code, `Capability ${capability} is not granted for the requested professional`, 403);
   }
 }
 

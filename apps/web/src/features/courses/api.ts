@@ -6,7 +6,7 @@ export type Course = {
 export type CourseSession = {
   id: string; courseId: string; instructorStaffMemberId: string; localDate: string;
   localStartMinute: number | null; durationMinutes: number | null; timezone: string;
-  occupiedStartAt: string; occupiedEndAt: string; status: string; revision: number;
+  occupiedStartAt: string; occupiedEndAt: string; status: string; revision: number; replayed?: boolean;
 };
 export type CourseEvent = { id: string; eventType: string; changes: unknown; createdAt: string; sessionId: string | null; courseId: string | null };
 
@@ -32,31 +32,16 @@ export const coursesApi = {
   cancelSession: async (sessionId: string) => (await api<{ data: CourseSession }>(`/v1/course-sessions/${sessionId}/cancel`, { method: "POST", operationId: operationId() })).data,
   complete: async (sessionId: string) => (await api<{ data: CourseSession }>(`/v1/course-sessions/${sessionId}/complete`, { method: "POST", operationId: operationId() })).data,
   instructors: async () => {
+    // CORRECCIÓN P1: `/v1/courses/instructors` aplica EXACTAMENTE la misma
+    // elegibilidad que el comando de programación (access_status, empleo,
+    // perfil profesional O rol BARBER). `/v1/professionals` sólo lista perfiles
+    // y no era autoridad para este selector.
     type Instructor = { staffMemberId: string; effectiveDisplayName: string; status: string; professionallyEnabled: boolean };
-    // `/v1/professionals` (H02) responde `{ items }` sin envelope `data`, mientras
-    // que las rutas H07 lo usan. Aceptar ambos evita que un `Promise.all` en la
-    // vista de sesiones pierda los instructores elegibles por un desajuste de envelope.
-    type Page = { items: Instructor[]; nextCursor?: string | null };
-    const eligible: Instructor[] = [];
-    const visited = new Set<string>();
-    let cursor: string | null = null;
-    do {
-      const params = new URLSearchParams({ limit: "100", status: "ACTIVE" });
-      if (cursor) params.set("cursor", cursor);
-      const result: Page & { data?: Page } = await api(`/v1/professionals?${params}`);
-      const page = result?.data ?? result;
-      if (!Array.isArray(page?.items) || page.items.some((item) => (
-        !item || typeof item.staffMemberId !== "string" || typeof item.effectiveDisplayName !== "string"
-        || typeof item.status !== "string" || typeof item.professionallyEnabled !== "boolean"
-      ))) throw new Error("La lista de instructores llegó en un formato inválido.");
-      eligible.push(...page.items.filter((item) => item.status === "ACTIVE" && item.professionallyEnabled));
-      cursor = page.nextCursor ?? null;
-      if (cursor !== null && (typeof cursor !== "string" || visited.has(cursor))) {
-        throw new Error("No se pudo completar la lista de instructores.");
-      }
-      if (cursor) visited.add(cursor);
-    } while (cursor);
-    return eligible;
+    const result: { data: Array<{ staffMemberId: string; effectiveDisplayName: string }> } = await api("/v1/courses/instructors");
+    if (!Array.isArray(result?.data) || result.data.some((item) => (
+      !item || typeof item.staffMemberId !== "string" || typeof item.effectiveDisplayName !== "string"
+    ))) throw new Error("La lista de instructores elegibles llegó en un formato inválido.");
+    return result.data.map((item) => ({ ...item, status: "ACTIVE", professionallyEnabled: true })) satisfies Instructor[];
   },
   publicList: (businessId: string) => publicData<PublicCourses>(`/v1/public/businesses/${encodeURIComponent(businessId)}/courses`),
   publicBusinesses: () => publicData<PublicCourseBusiness[]>("/v1/public/course-businesses")

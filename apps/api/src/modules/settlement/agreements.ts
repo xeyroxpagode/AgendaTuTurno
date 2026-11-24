@@ -90,6 +90,7 @@ export async function applicableVersion(tx: Tx, businessId: string, staffMemberI
     from econ.agreement_versions v join econ.agreements a on a.business_id=v.business_id and a.id=v.agreement_id
     where v.business_id=${businessId} and a.staff_member_id=${staffMemberId}
       and a.status='ACTIVE' and v.status='ACTIVE' and v.valid_from <= ${occurredAt.toISOString()} and v.valid_to > ${occurredAt.toISOString()}
+      and v.created_at <= ${occurredAt.toISOString()}
     order by v.valid_from desc, v.version desc limit 1`;
   return (result[0] as unknown as AgreementVersionRow) ?? null;
 }

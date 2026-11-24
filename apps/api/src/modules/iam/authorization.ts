@@ -1,5 +1,5 @@
 import type { FastifyRequest } from "fastify";
-import { DomainError, roleCapabilities, grantableCapabilitiesByRole, type Capability, type GrantScope, type RoleCode } from "@youngkingz/contracts";
+import { DomainError, roleCapabilities, grantableCapabilitiesByRole, type Capability, type DomainErrorCode, type GrantScope, type RoleCode } from "@youngkingz/contracts";
 import { rows, sql } from "../../lib/sql.js";
 import { database, supabaseAdmin } from "../../lib/runtime.js";
 
@@ -189,7 +189,10 @@ export class AuthorizationService {
     if (!actor.capabilities.has(capability)) throw new DomainError("FORBIDDEN", `Missing capability: ${capability}`, 403);
     const grantScope = actor.grantScopes.get(capability);
     if (grantScope?.staffMemberId && grantScope.staffMemberId !== scope?.staffMemberId) {
-      throw new DomainError("ECONOMY_FORBIDDEN", `Capability ${capability} is not granted for the requested professional`, 403);
+      // Catálogo V1.1 §6: ECONOMY_FORBIDDEN sólo para economía; el resto de
+      // capacidades (courses.*) usa FORBIDDEN.
+      const code: DomainErrorCode = capability.startsWith("economy.") ? "ECONOMY_FORBIDDEN" : "FORBIDDEN";
+      throw new DomainError(code, `Capability ${capability} is not granted for the requested professional`, 403);
     }
   }
 }
