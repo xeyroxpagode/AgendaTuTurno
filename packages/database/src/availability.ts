@@ -11,7 +11,7 @@ export const availabilityBusinessSchema = pgSchema("business");
 export const availabilityTeamSchema = pgSchema("team");
 
 export const allocationStatus = availabilitySchema.enum("allocation_status", ["ACTIVE", "RELEASED"]);
-export const allocationSource = availabilitySchema.enum("allocation_source", ["RESERVATION", "OPERATIONAL_BLOCK"]);
+export const allocationSource = availabilitySchema.enum("allocation_source", ["RESERVATION", "OPERATIONAL_BLOCK", "COURSE_SESSION"]);
 export const commitmentConflictStatus = availabilitySchema.enum("conflict_status", ["OPEN", "RESOLVED"]);
 export const effectiveUnavailabilitySource = availabilityTeamSchema.enum("effective_unavailability_source", ["APPLIED_ABSENCE", "OPERATIONAL_BLOCK"]);
 
