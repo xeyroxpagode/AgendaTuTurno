@@ -48,7 +48,16 @@ export async function createAgreementVersion(actor: Actor, raw: unknown, operati
 }
 
 export async function agreementVersions(actor: Actor, staffMemberId: string) {
-  return rows(sql`select id, version, modality, commission_base "commissionBase", bps, fixed_amount_minor "fixedAmountMinor", rent_amount_minor "rentAmountMinor", valid_from "validFrom", valid_to "validTo", terms_hash "termsHash", status from econ.agreement_versions where business_id=${actor.businessId} and staff_member_id in (select id from econ.agreements where business_id=${actor.businessId} and staff_member_id=${staffMemberId}) order by version desc`);
+  // `agreement_versions` NO tiene staff_member_id: el vínculo es
+  // agreement_id -> agreements(business_id, staff_member_id).
+  return rows(sql`
+    select v.id, v.version, v.modality, v.commission_base "commissionBase", v.bps,
+           v.fixed_amount_minor "fixedAmountMinor", v.rent_amount_minor "rentAmountMinor",
+           v.valid_from "validFrom", v.valid_to "validTo", v.terms_hash "termsHash", v.status
+    from econ.agreement_versions v
+    join econ.agreements a on a.business_id=v.business_id and a.id=v.agreement_id
+    where v.business_id=${actor.businessId} and a.staff_member_id=${staffMemberId}
+    order by v.version desc`);
 }
 
 export type AgreementVersionRow = {

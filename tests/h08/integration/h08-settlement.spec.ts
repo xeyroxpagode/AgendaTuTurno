@@ -3,7 +3,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertQaDatabase } from "../../support/h07-h08-seed";
 import { authenticateQaActor, QA_EMAILS } from "../../support/h07-h08-auth";
-import { createAgreementVersion } from "../../../apps/api/src/modules/settlement/agreements.js";
+import { createAgreementVersion, agreementVersions } from "../../../apps/api/src/modules/settlement/agreements.js";
 import { calculateEstimate } from "../../../apps/api/src/modules/settlement/calculator.js";
 import { closeSettlement } from "../../../apps/api/src/modules/settlement/close.js";
 import { selfEconomy } from "../../../apps/api/src/modules/settlement/self.js";
@@ -64,6 +64,14 @@ describe("H08 · Economía sobre PostgreSQL QA real", () => {
     expect(estimate.state).toBe("OPEN_ESTIMATE");
     expect(estimate.payableMinor).toBe("10000");
     expect(estimate.lines.some((line) => line.component === "COMMISSION" && line.amountMinor === "10000")).toBe(true);
+  });
+
+  it("listado de versiones por profesional (regresión del 500 detectado en navegador)", async () => {
+    const owner = await authenticateQaActor(QA_EMAILS.owner);
+    const versions = await agreementVersions(owner, BARBER);
+    expect(Array.isArray(versions)).toBe(true);
+    expect(versions.length).toBeGreaterThan(0);
+    expect(versions.every((version) => version.status === "ACTIVE" || version.status === "CANCELLED")).toBe(true);
   });
 
   it("acuerdo incompleto (sin base) se rechaza en validación", async () => {

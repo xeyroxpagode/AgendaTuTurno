@@ -20,7 +20,7 @@ export function AppShell({children}:{children:React.ReactNode}){
   const canSeeTeam=context?.capabilities.some(capability=>capability==="iam.staff.list"||capability==="professionals.read"||capability==="schedules.read")??false;
   const canSeeCatalog=context?.capabilities.includes("catalog.read")??false;
   const canSeeCourses=context?.capabilities.includes("courses.read")??false;
-  const canSeeOwnEconomy=context?.capabilities.includes("economy.self.read")??false;
+  const canSeeOwnEconomy=(context?.role==="BARBER"&&context?.capabilities.includes("economy.self.read"))??false;
   const canSeeEconomy=context?.capabilities.includes("economy.settlement.read")??false;
   const canSeeClients=context?.capabilities.includes("clients.read")??false;
   const canSeeAvailability=context?.capabilities.includes("availability.read")??false;
