@@ -31,7 +31,7 @@ export const agreementVersions = econSchema.table("agreement_versions", {
   createdByAccountId: uuid("created_by_account_id").notNull(),
   operationId: uuid("operation_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull()
-}, (table) => [index("agreement_versions_lookup").on(table.businessId, table.agreementId, table.validFrom)]);
+}, (table) => [index("agreement_versions_effective_lookup").on(table.businessId, table.agreementId, table.validFrom, table.validTo)]);
 
 export const estimates = econSchema.table("estimates", {
   id: uuid("id").primaryKey(),

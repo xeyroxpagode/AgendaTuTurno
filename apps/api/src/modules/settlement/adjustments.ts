@@ -3,6 +3,9 @@ import type { Actor } from "../iam/authorization.js";
 import { authorizationService } from "../iam/authorization.js";
 import { audit, executeOperation, revalidateAuthority } from "../system/operations.js";
 import { rows, sql } from "../../lib/sql.js";
+import { lockBusiness } from "../h05/domain.js";
+import { settledMinor } from "../obligations/domain.js";
+import { refreshObligationStatus } from "../money/commands.js";
 
 const CAPABILITY: Capability = "economy.settlement.close";
 
@@ -17,22 +20,37 @@ export async function adjustSettlement(actor: Actor, raw: unknown, operationId: 
     if (!settlement) throw new DomainError("NOT_FOUND", "Settlement not found", 404);
     authorizationService.require(actor, CAPABILITY, { staffMemberId: settlement.staffMemberId });
 
+    // Mismo lock y mismas guardas que H05 updateObligation: el ajuste no puede
+    // entrelazarse con un pago ni dejar el importe por debajo de lo pagado.
+    await lockBusiness(tx, actor.businessId);
+    const obligationId = input.kind === "RECEIVABLE" ? settlement.receivableObligationId : settlement.payableObligationId;
+    if (!obligationId) throw new DomainError("OBLIGATION_NOT_FOUND", "The settlement has no obligation of that kind", 404);
+    const [obligation] = await tx`
+      select id, amount_minor "amountMinor", revision, status::text status
+      from obligations.expense_obligations
+      where business_id=${actor.businessId} and id=${obligationId} for update` as unknown as Array<{ id: string; amountMinor: string | null; revision: number; status: string }>;
+    if (!obligation) throw new DomainError("OBLIGATION_NOT_FOUND", "Obligation not found", 404);
+    if (obligation.status === "CANCELLED") throw new DomainError("ADJUSTMENT_INVALID", "Cannot adjust a cancelled obligation", 409);
+    const nextAmount = BigInt(obligation.amountMinor ?? "0") + BigInt(input.amountMinor);
+    if (nextAmount < 0n) throw new DomainError("OBLIGATION_PAYMENT_EXCEEDS", "Adjustment cannot make the amount negative", 409);
+    const settled = await settledMinor(tx, actor.businessId, obligationId);
+    if (settled > nextAmount) throw new DomainError("OBLIGATION_PAYMENT_EXCEEDS", "Adjustment cannot leave the amount below what was already paid", 409);
+
     const [row] = await tx`
       insert into econ.settlement_adjustments(business_id, settlement_id, amount_minor, reason, source_type, source_id, created_by_account_id, operation_id)
       values (${actor.businessId}, ${input.settlementId}, ${input.amountMinor}, ${input.reason},
               ${input.sourceType ?? null}, ${input.sourceId ?? null}, ${actor.accountId}, ${operationId})
       returning id`;
     // Un refund sin sale_id NO reatribuye: sólo ajusta causalmente el saldo.
-    if (settlement.payableObligationId) {
-      await tx`
-        update obligations.expense_obligations
-        set amount_minor = amount_minor + ${input.amountMinor}::bigint,
-            revision = revision + 1, updated_at = now()
-        where business_id=${actor.businessId} and id=${settlement.payableObligationId}`;
-    }
+    await tx`
+      update obligations.expense_obligations
+      set amount_minor=${nextAmount.toString()}, revision=revision+1, updated_at=now(),
+          status=case when ${nextAmount.toString()}::bigint <= ${settled.toString()}::bigint then 'SETTLED' else status end
+      where business_id=${actor.businessId} and id=${obligationId}`;
+    await refreshObligationStatus(tx, actor, obligationId);
     await tx`update econ.settlements set status='ADJUSTED' where business_id=${actor.businessId} and id=${input.settlementId}`;
     await revalidateAuthority(tx, actor, CAPABILITY, { staffMemberId: settlement.staffMemberId });
-    await audit(tx, { actor, operationId, action: "settlement.adjusted", capability: CAPABILITY, resourceType: "SETTLEMENT", resourceId: input.settlementId, changes: { amountMinor: input.amountMinor, reason: input.reason, sourceType: input.sourceType ?? null, hasSourceId: Boolean(input.sourceId) } });
+    await audit(tx, { actor, operationId, action: "settlement.adjusted", capability: CAPABILITY, resourceType: "SETTLEMENT", resourceId: input.settlementId, changes: { amountMinor: input.amountMinor, kind: input.kind, reason: input.reason, sourceType: input.sourceType ?? null, hasSourceId: Boolean(input.sourceId) } });
     return { adjustmentId: row!.id as string, settlementId: input.settlementId, snapshotUnchanged: true };
   });
 }

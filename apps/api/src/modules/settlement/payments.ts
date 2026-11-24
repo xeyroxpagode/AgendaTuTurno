@@ -17,6 +17,11 @@ export async function registerSettlementPayment(actor: Actor, raw: unknown, oper
     from econ.settlements where business_id=${actor.businessId} and id=${input.settlementId}`);
   if (!settlement) throw new DomainError("NOT_FOUND", "Settlement not found", 404);
   authorizationService.require(actor, CAPABILITY, { staffMemberId: String(settlement.staffMemberId) });
+  // H05 `obligations.pay` es sensible y requiere grant explícito para RECEPTIONIST.
+  // H08 no lo suplanta: se reporta la falta con un código accionable.
+  if (!actor.capabilities.has("obligations.pay")) {
+    throw new DomainError("ECONOMY_FORBIDDEN", "Registrar pagos requiere la capability H05 obligations.pay (grant explícito)", 403);
+  }
   const obligationId = input.kind === "RECEIVABLE" ? settlement.receivableObligationId : settlement.payableObligationId;
   if (!obligationId) throw new DomainError("OBLIGATION_NOT_FOUND", "The settlement has no obligation of that kind", 404);
   return payObligation(actor, String(obligationId), { moneyOperationId: input.moneyOperationId, amountMinor: input.amountMinor }, operationId);

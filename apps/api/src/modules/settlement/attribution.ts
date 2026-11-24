@@ -2,7 +2,7 @@ import { commissionMinor, parseMinor } from "@youngkingz/contracts";
 import type { Tx } from "../system/operations.js";
 
 export type EconomicSource = {
-  sourceType: "SALE_LINE";
+  sourceType: "SALE";
   sourceId: string;
   saleId: string;
   attendanceId: string;
@@ -14,8 +14,8 @@ export type EconomicSource = {
   versionNote: string;
 };
 
-type LineRow = {
-  source_id: string; sale_id: string; attendance_id: string; occurred_at: Date;
+type SaleRow = {
+  sale_id: string; attendance_id: string; occurred_at: Date;
   line_total_minor: string; modality: string | null; commission_base: string | null;
   bps: number | null; version_id: string | null; terms_hash: string | null;
 };
@@ -23,59 +23,77 @@ type LineRow = {
 /**
  * NEW-ATTRIBUTION · El profesional es `attendances.attended_by_staff_member_id`
  * (prestador real verificado), NUNCA `staff_member_id` (quien registró).
- * Si no puede determinarse, la fila NO se atribuye: no se inventa destinatario.
- * Se excluyen líneas reemplazadas (`superseded_at`) y ventas no confirmadas.
+ *
+ * CORRECCIÓN P0 (EGM): la comisión se calcula POR VENTA, no por línea, porque
+ * H05 realiza cobros a nivel de Sale. Repartir el cobro entre líneas sería un
+ * prorrateo NO autorizado (CL-09). Una sola fuente por Sale evita además la
+ * duplicación de comisión. Se excluyen líneas `superseded_at` y ventas no
+ * confirmadas, y se resuelve UNA versión vigente por LATERAL (sin join que
+ * multiplique filas si existen varios acuerdos).
  */
 export async function eligibleSources(
   tx: Tx, businessId: string, staffMemberId: string, periodStart: Date, periodEnd: Date
 ): Promise<EconomicSource[]> {
-  const lines = await tx`
-    select sl.id source_id, s.id sale_id, a.id attendance_id, a.started_at occurred_at,
-           sl.line_total_minor,
+  const sales = await tx`
+    select s.id sale_id, a.id attendance_id, a.started_at occurred_at,
+           sum(sl.line_total_minor)::text line_total_minor,
            v.modality, v.commission_base, v.bps, v.id version_id, v.terms_hash
     from attendance.attendances a
     join sales.sales s on s.business_id=a.business_id and s.attendance_id=a.id and s.status='CONFIRMED'
     join sales.sale_lines sl on sl.business_id=s.business_id and sl.sale_id=s.id
       and sl.superseded_at is null and sl.kind='SERVICE'
-    left join econ.agreements ag on ag.business_id=a.business_id and ag.staff_member_id=a.attended_by_staff_member_id and ag.status='ACTIVE'
-    left join econ.agreement_versions v on v.business_id=ag.business_id and v.agreement_id=ag.id
-      and v.status='ACTIVE' and v.valid_from <= a.started_at and v.valid_to > a.started_at
+    left join lateral (
+      select v.id, v.modality, v.commission_base, v.bps, v.terms_hash
+      from econ.agreements ag
+      join econ.agreement_versions v on v.business_id=ag.business_id and v.agreement_id=ag.id
+      where ag.business_id=a.business_id and ag.staff_member_id=a.attended_by_staff_member_id
+        and ag.status='ACTIVE' and v.status='ACTIVE'
+        and v.valid_from <= a.started_at and v.valid_to > a.started_at
+      order by v.valid_from desc, v.version desc limit 1
+    ) v on true
     where a.business_id=${businessId} and a.attended_by_staff_member_id=${staffMemberId}
       and a.status='COMPLETED' and a.attended_by_staff_member_id is not null
       and a.started_at >= ${periodStart.toISOString()} and a.started_at < ${periodEnd.toISOString()}
-    order by a.started_at, sl.id` as unknown as LineRow[];
+    group by s.id, a.id, a.started_at, v.modality, v.commission_base, v.bps, v.id, v.terms_hash
+    order by a.started_at, s.id` as unknown as SaleRow[];
 
   const result: EconomicSource[] = [];
-  for (const line of lines) {
-    const lineTotal = parseMinor(line.line_total_minor);
-    if (!line.version_id || line.commission_base === null || line.bps === null) {
+  for (const sale of sales) {
+    const lineTotal = parseMinor(sale.line_total_minor);
+    if (!sale.version_id || sale.commission_base === null || sale.bps === null) {
       // Un acuerdo incompleto NO se convierte en importe cero.
       result.push({
-        sourceType: "SALE_LINE", sourceId: String(line.source_id), saleId: String(line.sale_id),
-        attendanceId: String(line.attendance_id), occurredAt: new Date(line.occurred_at),
+        sourceType: "SALE", sourceId: String(sale.sale_id), saleId: String(sale.sale_id),
+        attendanceId: String(sale.attendance_id), occurredAt: new Date(sale.occurred_at),
         lineTotalMinor: lineTotal, baseMinor: 0n, commissionMinor: 0n, versionId: null,
         versionNote: "NOT_CONFIGURED"
       });
       continue;
     }
     let base = lineTotal;
-    if (line.commission_base === "COLLECTED") {
+    if (sale.commission_base === "COLLECTED") {
       const [collected] = await tx`
         select coalesce(sum(ma.amount_minor),0)::text amount
         from money.money_allocations ma join money.money_operations mo
           on mo.business_id=ma.business_id and mo.id=ma.money_operation_id and mo.status='SUCCEEDED'
-        where ma.business_id=${businessId} and ma.target_type='SALE' and ma.target_id=${line.sale_id}` as unknown as { amount: string }[];
+        where ma.business_id=${businessId} and ma.target_type='SALE' and ma.target_id=${sale.sale_id}` as unknown as { amount: string }[];
+      // H05 registra REFUND con `refund_of_id` hacia el PAGO ORIGINAL y NO con
+      // sale_id. Resolver el linaje: refund -> pago original -> sale_id.
       const [refunded] = await tx`
-        select coalesce(sum(amount_minor),0)::text amount from money.money_operations
-        where business_id=${businessId} and sale_id=${line.sale_id} and kind='REFUND' and status='SUCCEEDED'` as unknown as { amount: string }[];
+        select coalesce(sum(r.amount_minor),0)::text amount
+        from money.money_operations r
+        join money.money_operations origin
+          on origin.business_id=r.business_id and origin.id=r.refund_of_id
+        where r.business_id=${businessId} and r.kind='REFUND' and r.status='SUCCEEDED'
+          and (origin.sale_id=${sale.sale_id} or r.sale_id=${sale.sale_id})` as unknown as { amount: string }[];
       const net = parseMinor(collected!.amount) - parseMinor(refunded!.amount);
-      base = net > 0n && net < lineTotal ? net : (net > lineTotal ? lineTotal : (net > 0n ? net : 0n));
+      base = net <= 0n ? 0n : (net > lineTotal ? lineTotal : net);
     }
     result.push({
-      sourceType: "SALE_LINE", sourceId: String(line.source_id), saleId: String(line.sale_id),
-      attendanceId: String(line.attendance_id), occurredAt: new Date(line.occurred_at),
-      lineTotalMinor: lineTotal, baseMinor: base, commissionMinor: commissionMinor(base, line.bps),
-      versionId: String(line.version_id), versionNote: line.terms_hash ?? "NO_TERMS_HASH"
+      sourceType: "SALE", sourceId: String(sale.sale_id), saleId: String(sale.sale_id),
+      attendanceId: String(sale.attendance_id), occurredAt: new Date(sale.occurred_at),
+      lineTotalMinor: lineTotal, baseMinor: base, commissionMinor: commissionMinor(base, sale.bps),
+      versionId: String(sale.version_id), versionNote: sale.terms_hash ?? "NO_TERMS_HASH"
     });
   }
   return result;

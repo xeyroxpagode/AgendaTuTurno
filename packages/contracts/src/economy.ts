@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_AMOUNT_MINOR } from "./money.js";
 
 /** H08 · CAP-08-01..06. Unidades menores de ARS. Sin tasas universales. */
 
@@ -70,14 +71,17 @@ export const settlementPaymentSchema = z.object({
   settlementId: z.string().uuid(),
   // H05: el pago consume una MoneyOperation YA CONFIRMADA; nunca inventa dinero.
   moneyOperationId: z.string().uuid(),
-  amountMinor: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  // El pago se integra con H05: no puede exceder el techo real de Money.
+  amountMinor: z.number().int().min(1).max(MAX_AMOUNT_MINOR),
   kind: z.enum(["PAYABLE", "RECEIVABLE"]).default("PAYABLE")
 }).strict();
 
 export const settlementAdjustmentSchema = z.object({
   settlementId: z.string().uuid(),
-  amountMinor: z.number().int().refine((value) => value !== 0, { message: "Adjustment must be non-zero" }),
+  amountMinor: z.number().int().min(-MAX_AMOUNT_MINOR).max(MAX_AMOUNT_MINOR).refine((value) => value !== 0, { message: "Adjustment must be non-zero" }),
   reason: z.string().trim().min(3).max(500),
+  // CL-08-05: payable y receivable NO se compensan. El ajuste declara el lado.
+  kind: z.enum(["PAYABLE", "RECEIVABLE"]).default("PAYABLE"),
   sourceType: z.enum(["REFUND", "CORRECTION", "MANUAL"]).optional(),
   sourceId: z.string().uuid().optional()
 }).strict();

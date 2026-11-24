@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createAgreementVersionSchema, type Capability } from "@youngkingz/contracts";
+import { DomainError, createAgreementVersionSchema, type Capability } from "@youngkingz/contracts";
 import type { Actor } from "../iam/authorization.js";
 import { authorizationService } from "../iam/authorization.js";
 import { audit, executeOperation, revalidateAuthority, type Tx } from "../system/operations.js";
@@ -20,6 +20,9 @@ export async function createAgreementVersion(actor: Actor, raw: unknown, operati
     validFrom: input.validFrom, validTo: input.validTo
   });
   return executeOperation({ operationId, command: "agreement.createVersion", actor, payload: { ...input, termsHash: hash } }, async (tx) => {
+    // Bloquea la fila de acuerdo: sin este lock dos altas concurrentes pueden
+    // calcular el mismo número de versión y fallar con 23505 sin traducir.
+    await tx`select id from econ.agreements where business_id=${actor.businessId} and staff_member_id=${input.staffMemberId} and status='ACTIVE' for update`;
     let agreement = await tx`select id from econ.agreements where business_id=${actor.businessId} and staff_member_id=${input.staffMemberId} and status='ACTIVE' order by created_at limit 1`;
     let agreementId: string;
     if (agreement.length) {
@@ -32,18 +35,25 @@ export async function createAgreementVersion(actor: Actor, raw: unknown, operati
     }
     const [latest] = await tx`select coalesce(max(version),0)::int version from econ.agreement_versions where business_id=${actor.businessId} and agreement_id=${agreementId}`;
     const version = Number(latest!.version) + 1;
-    const [row] = await tx`
-      insert into econ.agreement_versions(
-        business_id, agreement_id, version, modality, commission_base, bps,
-        fixed_amount_minor, rent_amount_minor, valid_from, valid_to, terms_hash,
-        created_by_account_id, operation_id)
-      values (${actor.businessId}, ${agreementId}, ${version}, ${input.modality},
-              ${input.commissionBase ?? null}, ${input.bps ?? null}, ${input.fixedAmountMinor ?? null},
-              ${input.rentAmountMinor ?? null}, ${input.validFrom}, ${input.validTo}, ${hash},
-              ${actor.accountId}, ${operationId}) returning id`;
+    let row: { id: string }[];
+    try {
+      row = await tx`
+        insert into econ.agreement_versions(
+          business_id, agreement_id, version, modality, commission_base, bps,
+          fixed_amount_minor, rent_amount_minor, valid_from, valid_to, terms_hash,
+          created_by_account_id, operation_id)
+        values (${actor.businessId}, ${agreementId}, ${version}, ${input.modality},
+                ${input.commissionBase ?? null}, ${input.bps ?? null}, ${input.fixedAmountMinor ?? null},
+                ${input.rentAmountMinor ?? null}, ${input.validFrom}, ${input.validTo}, ${hash},
+                ${actor.accountId}, ${operationId}) returning id`;
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code === "23505" || code === "23P01") throw new DomainError("AGREEMENT_OVERLAP", "An agreement version is already active for that period", 409);
+      throw error;
+    }
     await revalidateAuthority(tx, actor, AGREEMENT_CAPABILITY, { staffMemberId: input.staffMemberId });
-    await audit(tx, { actor, operationId, action: "agreement.version_created", capability: AGREEMENT_CAPABILITY, resourceType: "AGREEMENT_VERSION", resourceId: row!.id as string, changes: { agreementId, version, modality: input.modality, termsHash: hash } });
-    return { agreementId, version, id: row!.id as string, termsHash: hash };
+    await audit(tx, { actor, operationId, action: "agreement.version_created", capability: AGREEMENT_CAPABILITY, resourceType: "AGREEMENT_VERSION", resourceId: row[0]!.id as string, changes: { agreementId, version, modality: input.modality, termsHash: hash } });
+    return { agreementId, version, id: row[0]!.id as string, termsHash: hash };
   });
 }
 

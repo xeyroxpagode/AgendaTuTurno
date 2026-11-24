@@ -34,6 +34,12 @@ export async function calculateEstimate(
   const version = await applicableVersion(tx, actor.businessId, input.staffMemberId, input.from);
   const sources = await eligibleSources(tx, actor.businessId, input.staffMemberId, input.from, input.to);
   const fp = fingerprint(sources, version?.terms_hash ?? null);
+  // El snapshot declara las versiones REALMENTE usadas por las fuentes. Si el
+  // acuerdo cambió a mitad de período, se hashé el conjunto (no una sola).
+  const usedTerms = [...new Set(sources.map((source) => source.versionNote))].sort();
+  const effectiveTermsHash = usedTerms.length === 1
+    ? (usedTerms[0] ?? version?.terms_hash ?? null)
+    : createHash("sha256").update(usedTerms.join("|")).digest("hex");
   const unconfiguredSources = sources.filter((source) => source.versionNote === "NOT_CONFIGURED");
   const lines: EstimateResult["lines"] = [];
   let payable = 0n;
@@ -43,7 +49,7 @@ export async function calculateEstimate(
     return {
       state: "NOT_CONFIGURED", staffMemberId: input.staffMemberId,
       periodStart: input.from.toISOString(), periodEnd: input.to.toISOString(),
-      agreementVersionId: version?.id ?? null, termsHash: version?.terms_hash ?? null,
+      agreementVersionId: version?.id ?? null, termsHash: effectiveTermsHash,
       sourceFingerprint: fp, payableMinor: "0", receivableMinor: "0", lines: []
     };
   }
@@ -55,7 +61,7 @@ export async function calculateEstimate(
 
   if (version.modality === "FIXED" || version.modality === "MIXED") {
     if (version.fixed_amount_minor === null) {
-      return { state: "NOT_CONFIGURED", staffMemberId: input.staffMemberId, periodStart: input.from.toISOString(), periodEnd: input.to.toISOString(), agreementVersionId: version.id, termsHash: version.terms_hash, sourceFingerprint: fp, payableMinor: "0", receivableMinor: "0", lines: [] };
+      return { state: "NOT_CONFIGURED", staffMemberId: input.staffMemberId, periodStart: input.from.toISOString(), periodEnd: input.to.toISOString(), agreementVersionId: version.id, termsHash: effectiveTermsHash, sourceFingerprint: fp, payableMinor: "0", receivableMinor: "0", lines: [] };
     }
     const fixed = parseMinor(version.fixed_amount_minor);
     payable += fixed;
@@ -63,7 +69,7 @@ export async function calculateEstimate(
   }
   if (version.modality === "CHAIR_RENT" || version.modality === "MIXED") {
     if (version.rent_amount_minor === null) {
-      return { state: "NOT_CONFIGURED", staffMemberId: input.staffMemberId, periodStart: input.from.toISOString(), periodEnd: input.to.toISOString(), agreementVersionId: version.id, termsHash: version.terms_hash, sourceFingerprint: fp, payableMinor: "0", receivableMinor: "0", lines: [] };
+      return { state: "NOT_CONFIGURED", staffMemberId: input.staffMemberId, periodStart: input.from.toISOString(), periodEnd: input.to.toISOString(), agreementVersionId: version.id, termsHash: effectiveTermsHash, sourceFingerprint: fp, payableMinor: "0", receivableMinor: "0", lines: [] };
     }
     const rent = parseMinor(version.rent_amount_minor);
     receivable += rent;
@@ -75,7 +81,7 @@ export async function calculateEstimate(
     insert into econ.estimates(business_id, staff_member_id, period_start, period_end, agreement_version_id,
       terms_hash, source_fingerprint, total_payable_minor, total_receivable_minor, lines, state)
     values (${actor.businessId}, ${input.staffMemberId}, ${input.from.toISOString()}, ${input.to.toISOString()},
-      ${version.id}, ${version.terms_hash}, ${fp}, ${payable.toString()}, ${receivable.toString()},
+      ${version.id}, ${effectiveTermsHash}, ${fp}, ${payable.toString()}, ${receivable.toString()},
       ${JSON.stringify(lines)}::jsonb, 'OPEN_ESTIMATE')
     on conflict (business_id, staff_member_id, period_start, period_end) do update set
       agreement_version_id=excluded.agreement_version_id, terms_hash=excluded.terms_hash,
@@ -86,7 +92,8 @@ export async function calculateEstimate(
   return {
     state: "OPEN_ESTIMATE", staffMemberId: input.staffMemberId,
     periodStart: input.from.toISOString(), periodEnd: input.to.toISOString(),
-    agreementVersionId: version.id, termsHash: version.terms_hash,
+    agreementVersionId: version.id, termsHash: effectiveTermsHash,
     sourceFingerprint: fp, payableMinor: minorToString(payable), receivableMinor: minorToString(receivable), lines
   };
 }
+

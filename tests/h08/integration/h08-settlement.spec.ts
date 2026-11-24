@@ -116,6 +116,49 @@ describe("H08 · Economía sobre PostgreSQL QA real", () => {
     await expect(selfEconomy(owner, { from: from.toISOString(), to: to.toISOString() })).rejects.toMatchObject({ code: "ECONOMY_FORBIDDEN" });
   });
 
+  it("P0 EGM: COLLECTED descuenta refunds por refund_of_id y calcula POR VENTA (sin prorrateo)", async () => {
+    const owner = await authenticateQaActor(QA_EMAILS.owner);
+    const offset = 200 + Math.floor(Math.random() * 100);
+    const p0From = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + offset, 1));
+    const p0To = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + offset + 1, 1));
+    await createAgreementVersion(owner, {
+      staffMemberId: BARBER, modality: "COMMISSION", commissionBase: "COLLECTED", bps: 1000,
+      validFrom: new Date(p0From.getTime() - 86400000).toISOString(),
+      validTo: new Date(p0To.getTime() + 86400000).toISOString()
+    }, randomUUID());
+
+    const attendanceId = randomUUID(); const saleId = randomUUID(); const saleOp = randomUUID();
+    const occurred = new Date(p0From.getTime() + 86400000);
+    await sql`insert into system.operation_attempts(operation_id,business_id,actor_account_id,command_name,request_hash,principal_kind,principal_ref)
+      values (${saleOp},${B1},${OWNER_ACCOUNT},'qa.sale-p0',${randomUUID()},'STAFF',${OWNER_ACCOUNT})`;
+    await sql`insert into attendance.attendances(id,business_id,staff_member_id,attended_by_staff_member_id,walk_in,status,started_at,finished_at,services_performed_snapshot,contact_snapshot)
+      values (${attendanceId},${B1},${ORG},${BARBER},true,'COMPLETED',${occurred.toISOString()},${occurred.toISOString()},'[]'::jsonb,'{"name":"QA"}'::jsonb)`;
+    await sql`insert into sales.sales(id,business_id,operation_id,status,source,attendance_id,total_minor,actor_account_id,confirmed_at)
+      values (${saleId},${B1},${saleOp},'CONFIRMED','ATTENDANCE',${attendanceId},20000,${OWNER_ACCOUNT},${occurred.toISOString()})`;
+    for (const [position, total] of [[1, 10000], [2, 10000]]) {
+      await sql`insert into sales.sale_lines(id,business_id,sale_id,position,kind,name,quantity,unit_price_minor,discount_minor,line_total_minor)
+        values (${randomUUID()},${B1},${saleId},${position},'SERVICE','Servicio QA',1,${total},0,${total})`;
+    }
+    // Cobro parcial de 5000 y refund de 2000 vinculado por refund_of_id (H05 real).
+    const paymentOp = randomUUID();
+    await sql`insert into system.operation_attempts(operation_id,business_id,actor_account_id,command_name,request_hash,principal_kind,principal_ref)
+      values (${paymentOp},${B1},${OWNER_ACCOUNT},'qa.payment',${randomUUID()},'STAFF',${OWNER_ACCOUNT})`;
+    await sql`insert into money.money_operations(id,business_id,operation_id,kind,status,sale_id,amount_minor,confirmed_minor,currency,actor_account_id)
+      values (${paymentOp},${B1},${paymentOp},'PAYMENT','SUCCEEDED',${saleId},5000,5000,'ARS',${OWNER_ACCOUNT})`;
+    await sql`insert into money.money_allocations(id,business_id,money_operation_id,target_type,target_id,amount_minor,actor_account_id,operation_id)
+      values (${randomUUID()},${B1},${paymentOp},'SALE',${saleId},5000,${OWNER_ACCOUNT},${paymentOp})`;
+    const refundOp = randomUUID();
+    await sql`insert into system.operation_attempts(operation_id,business_id,actor_account_id,command_name,request_hash,principal_kind,principal_ref)
+      values (${refundOp},${B1},${OWNER_ACCOUNT},'qa.refund',${randomUUID()},'STAFF',${OWNER_ACCOUNT})`;
+    await sql`insert into money.money_operations(id,business_id,operation_id,kind,status,refund_of_id,amount_minor,confirmed_minor,currency,actor_account_id)
+      values (${refundOp},${B1},${refundOp},'REFUND','SUCCEEDED',${paymentOp},2000,2000,'ARS',${OWNER_ACCOUNT})`;
+
+    const estimate = await sql.begin((tx) => calculateEstimate(tx as never, owner, { staffMemberId: BARBER, from: p0From, to: p0To }));
+    // Base = 5000 cobrado - 2000 devuelto = 3000, comisión 10% = 300.
+    // Sin el correctivo sería 5000 por línea = 10000 base / 1000 comisión.
+    expect(estimate.payableMinor).toBe("300");
+  });
+
   it("cross-business: actor B2 no puede operar sobre la economía de B1", async () => {
     const ownerB2 = await authenticateQaActor(QA_EMAILS.ownerB2);
     expect(ownerB2.businessId).toBe("22222222-2222-4222-8222-222222222222");

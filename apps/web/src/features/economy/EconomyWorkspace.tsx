@@ -29,6 +29,10 @@ export function EconomyWorkspace({ staffMemberId, staffName }: { staffMemberId: 
   const [validFrom, setValidFrom] = useState(todayMonth() + "-01");
   const [validTo, setValidTo] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const [adjustSettlementId, setAdjustSettlementId] = useState("");
+  const [adjustAmount, setAdjustAmount] = useState("");
+  const [adjustReason, setAdjustReason] = useState("");
+  const [adjustKind, setAdjustKind] = useState("PAYABLE");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -66,7 +70,8 @@ export function EconomyWorkspace({ staffMemberId, staffName }: { staffMemberId: 
         <h2>Acuerdo y versiones</h2>
         <form className="form-grid" onSubmit={(event) => { event.preventDefault(); void run("agreement", async () => {
           const input: Record<string, unknown> = { staffMemberId, modality, validFrom: `${validFrom}T00:00:00.000Z`, validTo: `${validTo}T23:59:59.000Z` };
-          if (needsBase) { input.commissionBase = base; input.bps = Number(bps); }
+          // El usuario carga PORCENTAJE; el motor guarda PUNTOS BASE (1% = 100 bps).
+          if (needsBase) { input.commissionBase = base; input.bps = Math.round(Number(bps) * 100); }
           if (needsFixed && fixed) input.fixedAmountMinor = pesosToMinor(fixed);
           if (needsRent && rent) input.rentAmountMinor = pesosToMinor(rent);
           await economyApi.createVersion(input);
@@ -141,6 +146,30 @@ export function EconomyWorkspace({ staffMemberId, staffName }: { staffMemberId: 
             <p>Pagable {formatARS(item.payableMinor)} · Cobrable {formatARS(item.receivableMinor)}</p>
           </li>))}</ul>
         )}
+        {history.settlements.length > 0 && <div className="estimate-panel">
+          <h3>Registrar ajuste</h3>
+          <div className="form-grid">
+            <Field label="Liquidación">
+              <select value={adjustSettlementId} onChange={(event) => setAdjustSettlementId(event.target.value)}>
+                <option value="">Elegí una liquidación</option>
+                {history.settlements.map((item) => <option key={item.id} value={item.id}>{new Date(item.periodStart).toLocaleDateString("es-AR")}</option>)}
+              </select>
+            </Field>
+            <Field label="Lado">
+              <select value={adjustKind} onChange={(event) => setAdjustKind(event.target.value)}>
+                <option value="PAYABLE">A pagar al profesional</option>
+                <option value="RECEIVABLE">A cobrar (alquiler)</option>
+              </select>
+            </Field>
+            <Field label="Importe ($; negativo para reducir)"><input type="number" step="0.01" value={adjustAmount} onChange={(event) => setAdjustAmount(event.target.value)} /></Field>
+            <Field label="Motivo"><input value={adjustReason} onChange={(event) => setAdjustReason(event.target.value)} /></Field>
+            <Button disabled={busy !== null || !adjustSettlementId || !adjustAmount || adjustReason.trim().length < 3}
+              onClick={() => void run("adjust", async () => {
+                await economyApi.adjust({ settlementId: adjustSettlementId, amountMinor: Math.round(Number(adjustAmount) * 100), reason: adjustReason, kind: adjustKind });
+                setAdjustAmount(""); setAdjustReason(""); setAdjustSettlementId("");
+              }, "Ajuste registrado")}>Registrar ajuste</Button>
+          </div>
+        </div>}
         {history.adjustments.length > 0 && <ul className="audit-list">{history.adjustments.map((item) => (
           <li key={item.id} className="audit-item">Ajuste {formatARS(item.amountMinor)} · {item.reason}</li>
         ))}</ul>}

@@ -7,7 +7,10 @@ import { addLocalDays, localDateTimeToInstant } from "../availability/temporal.j
 const SESSION_TRANSITIONS: Readonly<Record<string, readonly string[]>> = {
   SCHEDULED: ["CONFIRMED", "CANCELLED"],
   CONFIRMED: ["RESCHEDULED", "CANCELLED", "COMPLETED"],
-  RESCHEDULED: ["RESCHEDULED", "CONFIRMED", "CANCELLED", "COMPLETED"],
+  // RESCHEDULED conserva la ocupación ya confirmada: volver a CONFIRMED
+  // insertaría una segunda allocation sobre el mismo intervalo y chocaría con
+  // el EXCLUDE GiST. La transición se elimina en lugar de degradar el error.
+  RESCHEDULED: ["RESCHEDULED", "CANCELLED", "COMPLETED"],
   CANCELLED: [],
   COMPLETED: []
 };
