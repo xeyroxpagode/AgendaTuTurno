@@ -31,7 +31,7 @@ export function registerEconomyRoutes(app: FastifyInstance, authenticate: PreHan
 
   app.post("/v1/economy/agreements/versions", auth, async (request) => {
     const actor = need(request, "economy.agreements.manage");
-    return { data: await createAgreementVersion(actor, request.body, op(request)) };
+    const result = await createAgreementVersion(actor, request.body, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   app.get("/v1/economy/estimate", auth, async (request) => {
@@ -43,19 +43,19 @@ export function registerEconomyRoutes(app: FastifyInstance, authenticate: PreHan
 
   app.post("/v1/economy/settlements/close", auth, async (request) => {
     const actor = need(request, "economy.settlement.close");
-    return { data: await closeSettlement(actor, request.body, op(request)) };
+    const result = await closeSettlement(actor, request.body, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   app.post("/v1/economy/settlements/adjust", auth, async (request) => {
     const actor = need(request, "economy.settlement.close");
     settlementAdjustmentSchema.parse(request.body);
-    return { data: await adjustSettlement(actor, request.body, op(request)) };
+    const result = await adjustSettlement(actor, request.body, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   app.post("/v1/economy/settlements/payment", auth, async (request) => {
     const actor = need(request, "economy.payment.manage");
     settlementPaymentSchema.parse(request.body);
-    return { data: await registerSettlementPayment(actor, request.body, op(request)) };
+    const result = await registerSettlementPayment(actor, request.body, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   app.get("/v1/economy/settlements/:staffMemberId/history", auth, async (request) => {
@@ -69,3 +69,4 @@ export function registerEconomyRoutes(app: FastifyInstance, authenticate: PreHan
     return { data: await selfEconomy(actor, request.query) };
   });
 }
+

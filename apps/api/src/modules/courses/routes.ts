@@ -31,29 +31,29 @@ export function registerCourseRoutes(app: FastifyInstance, authenticate: PreHand
 
   app.post("/v1/courses", auth, async (request) => {
     const actor = need(request, "courses.manage");
-    return { data: await createCourse(actor, request.body, op(request)) };
+    const result = await createCourse(actor, request.body, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   app.patch("/v1/courses/:id", auth, async (request) => {
     const actor = need(request, "courses.manage");
     const { id } = request.params as { id: string };
     updateCourseSchema.parse(request.body);
-    return { data: await updateCourse(actor, id, request.body, op(request)) };
+    const result = await updateCourse(actor, id, request.body, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   app.post("/v1/courses/:id/publish", auth, async (request) => {
     const actor = need(request, "courses.publish");
-    return { data: await publishCourse(actor, (request.params as { id: string }).id, op(request)) };
+    const result = await publishCourse(actor, (request.params as { id: string }).id, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   app.post("/v1/courses/:id/unpublish", auth, async (request) => {
     const actor = need(request, "courses.publish");
-    return { data: await unpublishCourse(actor, (request.params as { id: string }).id, op(request)) };
+    const result = await unpublishCourse(actor, (request.params as { id: string }).id, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   app.post("/v1/courses/:id/cancel", auth, async (request) => {
     const actor = need(request, "courses.manage");
-    return { data: await cancelCourse(actor, (request.params as { id: string }).id, op(request)) };
+    const result = await cancelCourse(actor, (request.params as { id: string }).id, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   app.get("/v1/courses/:id/sessions", auth, async (request) => {
@@ -66,7 +66,7 @@ export function registerCourseRoutes(app: FastifyInstance, authenticate: PreHand
     const { id } = request.params as { id: string };
     const input = scheduleCourseSessionSchema.parse(request.body);
     if (input.courseId !== id) throw new DomainError("VALIDATION_ERROR", "courseId in body must match the route", 400);
-    return { data: await scheduleSession(actor, input, op(request)) };
+    const result = await scheduleSession(actor, input, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   app.get("/v1/courses/history", auth, async (request) => {
@@ -76,7 +76,7 @@ export function registerCourseRoutes(app: FastifyInstance, authenticate: PreHand
 
   app.post("/v1/course-sessions/:id/confirm", auth, async (request) => {
     const actor = need(request, "courses.sessions.manage");
-    return { data: await confirmSession(actor, { sessionId: (request.params as { id: string }).id }, op(request)) };
+    const result = await confirmSession(actor, { sessionId: (request.params as { id: string }).id }, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   app.post("/v1/course-sessions/:id/reschedule", auth, async (request) => {
@@ -89,12 +89,12 @@ export function registerCourseRoutes(app: FastifyInstance, authenticate: PreHand
 
   app.post("/v1/course-sessions/:id/cancel", auth, async (request) => {
     const actor = need(request, "courses.sessions.manage");
-    return { data: await cancelSession(actor, { sessionId: (request.params as { id: string }).id }, op(request)) };
+    const result = await cancelSession(actor, { sessionId: (request.params as { id: string }).id }, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   app.post("/v1/course-sessions/:id/complete", auth, async (request) => {
     const actor = need(request, "courses.sessions.manage");
-    return { data: await completeSession(actor, { sessionId: (request.params as { id: string }).id }, op(request)) };
+    const result = await completeSession(actor, { sessionId: (request.params as { id: string }).id }, op(request)); return { data: result.data, replayed: result.replayed };
   });
 
   /** CAP-07-05 · Discovery público. Sólo PUBLICADOS; sin CTA académico. */
@@ -103,3 +103,4 @@ export function registerCourseRoutes(app: FastifyInstance, authenticate: PreHand
     return { data: await publicCourses(businessId) };
   });
 }
+

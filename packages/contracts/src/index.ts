@@ -257,7 +257,9 @@ export class DomainError extends Error { constructor(public readonly code: Domai
 export const roleCapabilities: Readonly<Record<RoleCode, readonly Capability[]>> = {
   // OWNER · autoridad general del Business (todas las capabilities salvo
   // `iam.security.recover`, que es exclusiva del proceso de recuperación).
-  OWNER: capabilities.filter((capability) => capability !== "iam.security.recover"),
+  // CL-13 · `economy.self.read` es EXCLUSIVA del BARBER: Owner/Recepción
+  // operan con `economy.*` sobre el Business, no con la vista propia.
+  OWNER: capabilities.filter((capability) => capability !== "iam.security.recover" && capability !== "economy.self.read"),
   // RECEPTIONIST · agenda compartida y operaciones de recepción:
   // consulta, historial, creación asistida, reprogramación, reasignación,
   // cancelación, llegada y no-show sobre las reservas del Business.
