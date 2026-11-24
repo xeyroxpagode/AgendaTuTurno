@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, EmptyState, StatusPill } from "@youngkingz/ui";
 import { ApiError } from "@/lib/api/client";
@@ -7,7 +8,7 @@ import {
   confirmNoShow, createAgendaReservation, getAgendaContext, getAgendaReservation,
   listAgenda, listAgendaProfessionals, listAgendaServices, overrideCancelReservation,
   overrideRescheduleReservation, reassignReservation, registerArrival,
-  type AgendaDetail, type AgendaItem, type ProfessionalOption, type ServiceOption,
+  type AgendaCourse, type AgendaDetail, type AgendaItem, type ProfessionalOption, type ServiceOption,
 } from "./api";
 
 type DateRange = { from: string; to: string };
@@ -55,6 +56,7 @@ const statusLabel = (status: string): string => {
 export function AgendaWorkspace() {
   const [capabilities, setCapabilities] = useState<string[]>([]);
   const [range, setRange] = useState<DateRange>({ from: todayLocal(), to: todayLocal() });
+  const [courseOccupancy, setCourseOccupancy] = useState<AgendaCourse[]>([]);
   const [items, setItems] = useState<AgendaItem[]>([]);
   const [professionals, setProfessionals] = useState<ProfessionalOption[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
@@ -90,6 +92,7 @@ export function AgendaWorkspace() {
       ]);
       setCapabilities(context.capabilities);
       setItems(agenda.items);
+      setCourseOccupancy(agenda.courseOccupancy ?? []);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo cargar la agenda.");
     } finally {
@@ -281,6 +284,18 @@ export function AgendaWorkspace() {
         </div>
       )}
 
+      {!loading && courseOccupancy.length > 0 && (
+        <section className="agenda-group" aria-label="Ocupación por cursos">
+          <h2>Ocupación por cursos</h2>
+          <ul className="agenda-list">{courseOccupancy.map((course) => (
+            <li className="agenda-item" key={course.id}>
+              <span className="agenda-time">{timeOf(course.startsAt)} – {timeOf(course.endsAt)}</span>
+              <span className="agenda-main"><strong>{course.title}</strong><span className="muted">{nameOf(course.staffMemberId)} · {course.localDate}</span></span>
+            </li>
+          ))}</ul>
+        </section>
+      )}
+
       {detailLoading && <div className="skeleton" aria-busy="true" />}
 
       {selected && (
@@ -333,6 +348,10 @@ export function AgendaWorkspace() {
                 {busy ? "Registrando…" : "Registrar llegada"}
               </Button>
             </div>
+          )}
+
+          {can("attendance.register") && selected.reservation.status === "CONFIRMED" && selected.reservation.arrivedAt && (
+            <Link className="button secondary" href={`/attendance?reservation=${selected.reservation.id}`}>Registrar atención de este turno</Link>
           )}
 
           {canNoShow && selected.reservation.status === "CONFIRMED" && (

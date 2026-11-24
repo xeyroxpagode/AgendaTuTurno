@@ -10,7 +10,7 @@ import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../../apps/api/src/app";
 import { database } from "../../../apps/api/src/lib/runtime";
-import { seedBookingBusiness, type BookingSeed } from "./booking-fixtures";
+import { nextBookingWednesday, seedBookingBusiness, type BookingSeed } from "./booking-fixtures";
 import { createIntent } from "../../../apps/api/src/modules/booking/security/guest-access";
 
 let app: FastifyInstance;
@@ -39,7 +39,7 @@ describe("H03.U04 fault injection (PostgreSQL real + API real)", () => {
     const quoteRes = await app.inject({
       method: "POST",
       url: `/v1/public/businesses/${seed.business}/booking-quotes`,
-      payload: { serviceIds: [seed.serviceCut], professionalPreference: { type: "SPECIFIC", staffMemberId: seed.staffA }, localDate: "2026-11-18", visibleStart: "13:30" },
+      payload: { serviceIds: [seed.serviceCut], professionalPreference: { type: "SPECIFIC", staffMemberId: seed.staffA }, localDate: nextBookingWednesday(), visibleStart: "13:30" },
     });
     expect(quoteRes.statusCode).toBe(200);
     const quote = quoteRes.json() as { quote: string };
@@ -74,7 +74,7 @@ describe("H03.U04 fault injection (PostgreSQL real + API real)", () => {
     const quoteRes = await app.inject({
       method: "POST",
       url: `/v1/public/businesses/${seed.business}/booking-quotes`,
-      payload: { serviceIds: [seed.serviceCut], professionalPreference: { type: "SPECIFIC", staffMemberId: seed.staffA }, localDate: "2026-11-18", visibleStart: "16:00" },
+      payload: { serviceIds: [seed.serviceCut], professionalPreference: { type: "SPECIFIC", staffMemberId: seed.staffA }, localDate: nextBookingWednesday(), visibleStart: "16:00" },
     });
     const quote = quoteRes.json() as { quote: string };
     const intent = createIntent();
@@ -96,7 +96,7 @@ describe("H03.U04 fault injection (PostgreSQL real + API real)", () => {
     const cancelOp = randomUUID(); const rescheduleOp = randomUUID();
     const results = await Promise.all([
       app.inject({ method: "POST", url: `/v1/public/reservations/${reservationId}/cancel`, headers: { "content-type": "application/json", "x-guest-token": guestToken, "x-operation-id": cancelOp }, payload: { expectedRevision: revision } }),
-      app.inject({ method: "POST", url: `/v1/public/reservations/${reservationId}/reschedule`, headers: { "content-type": "application/json", "x-guest-token": guestToken, "x-operation-id": rescheduleOp }, payload: { expectedRevision: revision, localDate: "2026-11-18", visibleStart: "16:30" } }),
+      app.inject({ method: "POST", url: `/v1/public/reservations/${reservationId}/reschedule`, headers: { "content-type": "application/json", "x-guest-token": guestToken, "x-operation-id": rescheduleOp }, payload: { expectedRevision: revision, localDate: nextBookingWednesday(), visibleStart: "16:30" } }),
     ]);
 
     const statuses = results.map(r => r.statusCode).sort();
@@ -122,7 +122,7 @@ describe("H03.U04 fault injection (PostgreSQL real + API real)", () => {
     const quoteRes = await app.inject({
       method: "POST",
       url: `/v1/public/businesses/${seed.business}/booking-quotes`,
-      payload: { serviceIds: [seed.serviceCut], professionalPreference: { type: "SPECIFIC", staffMemberId: seed.staffA }, localDate: "2026-11-25", visibleStart: "10:30" },
+      payload: { serviceIds: [seed.serviceCut], professionalPreference: { type: "SPECIFIC", staffMemberId: seed.staffA }, localDate: nextBookingWednesday(1), visibleStart: "10:30" },
     });
     const quote = quoteRes.json() as { quote: string };
     const intent = createIntent();
@@ -138,8 +138,8 @@ describe("H03.U04 fault injection (PostgreSQL real + API real)", () => {
 
     const opRes1 = randomUUID(); const opRes2 = randomUUID();
     const results = await Promise.all([
-      app.inject({ method: "POST", url: `/v1/public/reservations/${reservationId}/reschedule`, headers: { "content-type": "application/json", "x-guest-token": guestToken, "x-operation-id": opRes1 }, payload: { expectedRevision: revision, localDate: "2026-11-25", visibleStart: "11:00" } }),
-      app.inject({ method: "POST", url: `/v1/public/reservations/${reservationId}/reschedule`, headers: { "content-type": "application/json", "x-guest-token": guestToken, "x-operation-id": opRes2 }, payload: { expectedRevision: revision, localDate: "2026-11-25", visibleStart: "11:30" } }),
+      app.inject({ method: "POST", url: `/v1/public/reservations/${reservationId}/reschedule`, headers: { "content-type": "application/json", "x-guest-token": guestToken, "x-operation-id": opRes1 }, payload: { expectedRevision: revision, localDate: nextBookingWednesday(1), visibleStart: "11:00" } }),
+      app.inject({ method: "POST", url: `/v1/public/reservations/${reservationId}/reschedule`, headers: { "content-type": "application/json", "x-guest-token": guestToken, "x-operation-id": opRes2 }, payload: { expectedRevision: revision, localDate: nextBookingWednesday(1), visibleStart: "11:30" } }),
     ]);
 
     const statuses = results.map(r => r.statusCode).sort();

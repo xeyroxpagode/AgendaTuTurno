@@ -15,7 +15,7 @@ export type SessionRow = {
 
 export async function getCourse(businessId: string, courseId: string, tx?: Tx) {
   if (tx) {
-    const result = await tx`select id, title, summary, description, status::text status, revision, published_at "publishedAt", contact_channel "contactChannel", contact_value "contactValue" from courses.courses where business_id=${businessId} and id=${courseId}` as unknown as CourseRow[];
+    const result = await tx`select id, title, summary, description, status::text status, revision, published_at "publishedAt", contact_channel "contactChannel", contact_value "contactValue" from courses.courses where business_id=${businessId} and id=${courseId} for update` as unknown as CourseRow[];
     return result[0];
   }
   const result = await rows<CourseRow>(sql`select id, title, summary, description, status::text status, revision, published_at "publishedAt", contact_channel "contactChannel", contact_value "contactValue" from courses.courses where business_id=${businessId} and id=${courseId}`);
@@ -29,7 +29,7 @@ export async function requireCourse(businessId: string, courseId: string, tx?: T
 }
 
 export async function listCourses(businessId: string) {
-  return rows(sql`select id, title, summary, status::text status, revision, published_at "publishedAt", created_at "createdAt" from courses.courses where business_id=${businessId} order by created_at desc`);
+  return rows(sql`select id, title, summary, contact_channel "contactChannel", contact_value "contactValue", status::text status, revision, published_at "publishedAt", created_at "createdAt" from courses.courses where business_id=${businessId} order by created_at desc`);
 }
 
 export async function listSessions(businessId: string, courseId: string) {
@@ -58,7 +58,9 @@ export async function sessionHistory(businessId: string, where: { courseId?: str
     from (
       select id, event_type, changes, created_at, course_id, null::uuid session_id, business_id from courses.course_events
       union all
-      select id, event_type, changes, created_at, null::uuid course_id, session_id, business_id from courses.course_session_events
+      select se.id, se.event_type, se.changes, se.created_at, s.course_id, se.session_id, se.business_id
+      from courses.course_session_events se
+      join courses.course_sessions s on s.business_id=se.business_id and s.id=se.session_id
     ) e
     where e.business_id=${businessId}
       and (${where.courseId ?? null}::uuid is null or e.course_id=${where.courseId ?? null}::uuid)
@@ -66,17 +68,38 @@ export async function sessionHistory(businessId: string, where: { courseId?: str
     order by e.created_at desc limit 200`);
 }
 
-/** Discovery público: SOLO cursos PUBLICADOS y sesiones confirmadas. */
+export async function publicCourseBusinesses() {
+  return rows<{ id: string; name: string }>(sql`
+    select b.id, b.display_name name
+    from business.businesses b
+    where b.status='ACTIVE' and exists (
+      select 1 from courses.courses c where c.business_id=b.id and c.status='PUBLISHED'
+    )
+    order by b.display_name, b.id`);
+}
+
+/** Discovery público de un negocio activo y sus sesiones confirmadas. */
 export async function publicCourses(businessId: string) {
+  const [business] = await rows<{ id: string; name: string; bookingEnabled: boolean }>(sql`
+    select b.id, b.display_name name, coalesce(v.public_booking_enabled, false) "bookingEnabled"
+    from business.businesses b
+    left join business.booking_policy_states ps on ps.business_id=b.id
+    left join business.booking_policy_versions v on v.business_id=b.id and v.id=ps.current_version_id
+    where b.id=${businessId} and b.status='ACTIVE'`);
+  if (!business) throw new DomainError("NOT_FOUND", "Este enlace no corresponde a una barbería activa", 404);
   const courses = await rows(sql`
-    select id, title, summary, description, contact_channel "contactChannel", contact_value "contactValue", published_at "publishedAt"
+    select id, title, summary, description, contact_channel "contactChannel", case when contact_channel <> 'NONE' then contact_value end "contactValue", published_at "publishedAt"
     from courses.courses where business_id=${businessId} and status='PUBLISHED' order by published_at desc`);
   const sessions = await rows(sql`
     select s.id, s.course_id "courseId", s.local_date "localDate", s.timezone,
-           s.occupied_start_at "start", s.occupied_end_at "end"
-    from courses.course_sessions s join courses.courses c on c.business_id=s.business_id and c.id=s.course_id
+           s.occupied_start_at "start", s.occupied_end_at "end",
+           pp.professional_display_name "instructorName"
+    from courses.course_sessions s
+    join courses.courses c on c.business_id=s.business_id and c.id=s.course_id
+    join team.staff_members sm on sm.business_id=s.business_id and sm.id=s.instructor_staff_member_id
+    left join team.professional_profiles pp on pp.business_id=sm.business_id and pp.staff_member_id=sm.id
     where s.business_id=${businessId} and c.status='PUBLISHED'
       and s.status in ('CONFIRMED','RESCHEDULED') and s.occupied_end_at > now()
     order by s.occupied_start_at`);
-  return { courses, sessions };
+  return { business, courses, sessions };
 }

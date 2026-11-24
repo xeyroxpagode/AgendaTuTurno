@@ -3,6 +3,7 @@ import type { Actor } from "../iam/authorization.js";
 import type { Tx } from "../system/operations.js";
 import { revalidateAuthority } from "../system/operations.js";
 import { lockAvailabilityGuard } from "../availability/guard.js";
+import { loadBaseBusinessIntervals, loadStaffBase } from "../availability/queries.js";
 import { translateAllocationError } from "../availability/allocation.js";
 import { assertInstructorEligible, businessTimezone, composeLocalInterval } from "./domain.js";
 
@@ -26,6 +27,7 @@ export type CourseClaimInput = {
 export async function claimCourseSession(tx: Tx, actor: Actor, input: CourseClaimInput) {
   if (actor.businessId !== input.businessId) throw new DomainError("FORBIDDEN", "Allocation Business does not match the actor context", 403);
 
+  await lockAvailabilityGuard(tx, input.businessId);
   const timezone = await businessTimezone(input.businessId, tx);
   await assertInstructorEligible(tx, input.businessId, input.instructorStaffMemberId);
 
@@ -48,7 +50,14 @@ export async function claimCourseSession(tx: Tx, actor: Actor, input: CourseClai
     });
   }
 
-  await lockAvailabilityGuard(tx, input.businessId);
+  const hours = await loadBaseBusinessIntervals(tx, input.businessId, input.localDate);
+  const schedule = await loadStaffBase(tx, input.businessId, input.instructorStaffMemberId, input.localDate);
+  const covers = (block: { startMinute: number; endMinute: number }) =>
+    block.startMinute <= interval.startMinute && block.endMinute >= interval.endMinute;
+  if (!hours.some(covers) || !schedule.some(covers)) {
+    throw new DomainError("NO_AVAILABILITY", "La sesión está fuera del horario habilitado del negocio o del instructor", 409);
+  }
+
   try {
     const [allocation] = await tx`
       insert into availability.resource_allocations(

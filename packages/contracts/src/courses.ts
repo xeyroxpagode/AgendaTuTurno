@@ -16,7 +16,13 @@ export const createCourseSchema = z.object({
   contactValue: z.string().trim().max(200).optional()
 }).strict();
 
-export const updateCourseSchema = createCourseSchema.partial().extend({ revision: z.number().int().positive() }).strict();
+export const updateCourseSchema = createCourseSchema.partial().extend({
+  summary: createCourseSchema.shape.summary.nullable(),
+  description: createCourseSchema.shape.description.nullable(),
+  contactChannel: createCourseSchema.shape.contactChannel.removeDefault().optional(),
+  contactValue: createCourseSchema.shape.contactValue.nullable(),
+  revision: z.number().int().positive()
+}).strict();
 
 export const scheduleCourseSessionSchema = z.object({
   courseId: z.string().uuid(),

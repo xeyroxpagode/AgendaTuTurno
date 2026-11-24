@@ -127,3 +127,17 @@
 .absence-content .agenda-item,.attendance-content .agenda-item{grid-template-columns:104px minmax(0,1fr) auto auto}
 .absence-content .agenda-create p,.attendance-content .agenda-create p{margin:0}
 @media(max-width:640px){.absence-content .agenda-item,.attendance-content .agenda-item{grid-template-columns:1fr;gap:8px}}
+
+@media (min-width: 901px) {
+  .sidebar .nav {
+    flex: 1 1 auto;
+    align-content: start;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .sidebar-foot {
+    flex: 0 0 auto;
+    padding-top: 8px;
+  }
+}

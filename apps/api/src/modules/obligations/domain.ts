@@ -36,7 +36,7 @@ export type ObligationRow = {
 export async function loadObligation(tx: Tx, businessId: string, id: string, forUpdate = false): Promise<ObligationRow> {
   const rows = await tx`
     select id, business_id "businessId", operation_id "operationId", kind::text kind, title,
-           counterparty_name "counterpartyName", amount_minor::int "amountMinor",
+           counterparty_name "counterpartyName", amount_minor "amountMinor",
            amount_state::text "amountState", currency, due_date "dueDate", status::text status,
            revision::int revision, note, cancelled_at "cancelledAt",
            actor_account_id "actorAccountId", created_at "createdAt", updated_at "updatedAt"
@@ -45,15 +45,33 @@ export async function loadObligation(tx: Tx, businessId: string, id: string, for
      ${forUpdate ? tx`for update` : tx``}`;
   const row = rows[0];
   if (!row) throw missing("esa obligación");
-  return row as unknown as ObligationRow;
+  return { ...row, amountMinor: row.amountMinor === null ? null : exactMinor(row.amountMinor) } as unknown as ObligationRow;
+}
+
+export function exactMinor(value: unknown): number {
+  const amount = Number(value);
+  if (!Number.isSafeInteger(amount)) throw new DomainError("ADJUSTMENT_INVALID", "El saldo excede el rango admitido por Obligaciones.", 409);
+  return amount;
+}
+
+export async function obligationPaymentScope(tx: Tx, businessId: string, obligationId: string) {
+  const [obligation] = await tx`
+    select to_jsonb(o)->>'settlement_id' "settlementId" from obligations.expense_obligations o
+    where o.business_id=${businessId} and o.id=${obligationId}`;
+  if (!obligation) throw missing("esa obligación");
+  if (!obligation.settlementId) return undefined;
+  const [settlement] = await tx`select staff_member_id "staffMemberId" from econ.settlements
+    where business_id=${businessId} and id=${obligation.settlementId}`;
+  if (!settlement) throw missing("esa liquidación");
+  return { staffMemberId: String(settlement.staffMemberId) };
 }
 
 export async function settledMinor(tx: Tx, businessId: string, obligationId: string): Promise<number> {
   const [row] = await tx`
-    select coalesce(sum(amount_minor),0)::int total
+    select coalesce(sum(amount_minor),0)::text total
       from obligations.obligation_payments
      where business_id = ${businessId} and obligation_id = ${obligationId}`;
-  return Number(row?.total ?? 0);
+  return exactMinor(row?.total ?? 0);
 }
 
 /** Snapshot de la obligación con saldo DERIVADO. */

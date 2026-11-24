@@ -51,7 +51,11 @@ function localClock(iso: string, timeZone: string): string {
 }
 
 function todayInZone(timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date());
+  const fields = new Intl.DateTimeFormat("en-GB", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(new Date());
+  const part = (type: Intl.DateTimeFormatPartTypes) => fields.find((field) => field.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
 type EditorState = {

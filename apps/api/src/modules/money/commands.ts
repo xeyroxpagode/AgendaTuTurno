@@ -6,7 +6,8 @@ import {
   type MoneyComponent
 } from "@youngkingz/contracts";
 import type { Actor } from "../iam/authorization.js";
-import { audit, executeDurableAttempt, executeOperation, prepareDurableOperation, type Tx } from "../system/operations.js";
+import { obligationPaymentScope } from "../obligations/domain.js";
+import { audit, executeDurableAttempt, executeOperation, prepareDurableOperation, revalidateAuthority, type Tx } from "../system/operations.js";
 import {
   assertActorStillAuthorized, conflict, lockBusiness, missing, requireCapability
 } from "../h05/domain.js";
@@ -233,15 +234,20 @@ async function resolveCashSession(tx: Tx, actor: Actor, cashSessionId?: string |
 /** Importe pagable de una obligación (nunca mayor al saldo pendiente). */
 async function obligationPayableMinor(tx: Tx, actor: Actor, obligationId: string, available: number): Promise<number> {
   const [obligation] = await tx`
-    select id, amount_minor::int "amountMinor", amount_state::text "amountState", status::text status
-      from obligations.expense_obligations
+    select id, amount_minor::text "amountMinor", amount_state::text "amountState", status::text status,
+           to_jsonb(o)->>'settlement_id' "settlementId"
+      from obligations.expense_obligations o
      where business_id = ${actor.businessId} and id = ${obligationId}
      for update`;
   if (!obligation) throw missing("esa obligación");
+  if (obligation.settlementId) {
+    const scope = await obligationPaymentScope(tx, actor.businessId, obligationId);
+    await revalidateAuthority(tx, actor, "obligations.pay", scope);
+  }
   if (obligation.status === "SETTLED") throw new DomainError("OBLIGATION_ALREADY_SETTLED", "La obligación ya está saldada", 409);
   if (obligation.status === "CANCELLED") throw conflict("La obligación está cancelada");
   const [paid] = await tx`
-    select coalesce(sum(amount_minor),0)::int total from obligations.obligation_payments
+    select coalesce(sum(amount_minor),0)::text total from obligations.obligation_payments
      where business_id = ${actor.businessId} and obligation_id = ${obligationId}`;
   const settled = Number(paid?.total ?? 0);
   if (obligation.amountMinor === null) return available; // importe desconocido: pago parcial admisible
@@ -251,16 +257,16 @@ async function obligationPayableMinor(tx: Tx, actor: Actor, obligationId: string
 /** Recalcula el estado DERIVADO de la obligación (no es un saldo canónico). */
 export async function refreshObligationStatus(tx: Tx, actor: Actor, obligationId: string): Promise<void> {
   const [obligation] = await tx`
-    select amount_minor::int "amountMinor", amount_state::text "amountState", status::text status
+    select amount_minor::text "amountMinor", amount_state::text "amountState", status::text status
       from obligations.expense_obligations
      where business_id = ${actor.businessId} and id = ${obligationId} for update`;
   if (!obligation) throw missing("esa obligación");
   if (obligation.status === "CANCELLED" || obligation.status === "SETTLED") return;
   const [paid] = await tx`
-    select coalesce(sum(amount_minor),0)::int total from obligations.obligation_payments
+    select coalesce(sum(amount_minor),0)::text total from obligations.obligation_payments
      where business_id = ${actor.businessId} and obligation_id = ${obligationId}`;
   const settled = Number(paid?.total ?? 0);
-  const amount = obligation.amountMinor;
+  const amount = obligation.amountMinor === null ? null : Number(obligation.amountMinor);
   let status: "OPEN" | "PARTIAL" | "SETTLED" = "OPEN";
   if (amount === null) status = settled > 0 ? "PARTIAL" : "OPEN";
   else if (settled <= 0) status = "OPEN";
@@ -280,7 +286,7 @@ export async function allocateMoney(actor: Actor, moneyOperationId: string, body
   return executeOperation({ actor, operationId, command: "money.allocate", payload: { moneyOperationId, ...input } }, async (tx) => {
     await lockBusiness(tx, actor.businessId);
     const operation = await loadMoneyOperation(tx, actor.businessId, moneyOperationId, true);
-    if (operation.confirmedMinor <= 0) {
+    if (operation.kind !== "PAYMENT" || operation.confirmedMinor <= 0) {
       throw new DomainError("MONEY_NOT_CONFIRMED", "La operación no tiene dinero confirmado para asignar", 409, { status: operation.status });
     }
     const [allocated] = await tx`

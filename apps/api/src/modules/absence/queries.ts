@@ -89,6 +89,8 @@ export async function getAbsenceDetail(actor: Actor, absenceId: string): Promise
  */
 export async function listAbsenceConflicts(actor: Actor, absenceId: string): Promise<Array<{
   reservationId: string | null;
+  courseId: string | null;
+  courseTitle: string | null;
   allocationId: string;
   staffMemberId: string;
   localDate: string;
@@ -108,20 +110,24 @@ export async function listAbsenceConflicts(actor: Actor, absenceId: string): Pro
   const absence = detail.absence;
 
   const affected = await rows<{
-    reservationId: string | null; allocationId: string; staffMemberId: string; localDate: string;
+    reservationId: string | null; courseId: string | null; courseTitle: string | null;
+    allocationId: string; staffMemberId: string; localDate: string;
     visibleStartAt: Date; visibleEndAt: Date; startsAt: Date | null; endsAt: Date | null;
     customerName: string | null; status: string | null; revision: number | null; serviceNames: string[];
   }>(sql`
     select r.id "reservationId", a.id "allocationId", a.staff_member_id "staffMemberId",
            a.local_date::text "localDate", a.visible_start_at "visibleStartAt", a.visible_end_at "visibleEndAt",
-           r.starts_at "startsAt", r.ends_at "endsAt",
-           r.contact_snapshot->>'name' "customerName", r.status::text status, r.revision::int revision,
+           r.starts_at "startsAt", r.ends_at "endsAt", c.id "courseId", c.title "courseTitle",
+           r.contact_snapshot->>'name' "customerName", coalesce(r.status::text,s.status) status, r.revision::int revision,
            coalesce((select array_agg(i.service_name_snapshot order by i.position)
                        from booking.reservation_items i
                       where i.business_id = r.business_id and i.reservation_id = r.id), '{}') "serviceNames"
       from availability.resource_allocations a
       left join booking.reservations r
              on r.business_id = a.business_id and r.id = a.source_id and a.source_type = 'RESERVATION'
+      left join courses.course_sessions s
+             on s.business_id=a.business_id and s.id=a.source_id and a.source_type='COURSE_SESSION'
+      left join courses.courses c on c.business_id=s.business_id and c.id=s.course_id
      where a.business_id = ${actor.businessId}
        and a.staff_member_id = ${absence.staffMemberId}
        and a.local_date = ${absence.localDate}
@@ -133,6 +139,7 @@ export async function listAbsenceConflicts(actor: Actor, absenceId: string): Pro
     select c.allocation_id "allocationId", c.id, c.status::text status, c.resolution_reference "resolutionReference"
       from availability.commitment_conflicts c
      where c.business_id = ${actor.businessId} and c.reason_code = 'APPLIED_ABSENCE'
+       and c.source_operation_id=(select ar.created_operation_id from absence.absence_requests ar where ar.business_id=c.business_id and ar.id=${absenceId})
      order by c.detected_at desc`);
 
   const byAllocation = new Map(conflicts.map((conflict) => [conflict.allocationId, conflict]));
@@ -151,6 +158,8 @@ export async function listAbsenceConflicts(actor: Actor, absenceId: string): Pro
       const conflict = byAllocation.get(item.allocationId);
       return {
         reservationId: item.reservationId,
+        courseId: item.courseId,
+        courseTitle: item.courseTitle,
         allocationId: item.allocationId,
         staffMemberId: item.staffMemberId,
         localDate: item.localDate,

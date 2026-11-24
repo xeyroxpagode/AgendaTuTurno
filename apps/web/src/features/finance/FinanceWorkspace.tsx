@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { api, ApiError } from "@/lib/api/client";
 import {
   financeApi, formatARS, releaseOperationId, stableOperationId,
@@ -83,7 +84,7 @@ export function FinanceWorkspace({ initialView = "CAJA" }: { initialView?: Finan
     if (item === "CAJA") return can("cash.open") || can("cash.close");
     if (item === "VENTAS") return can("sales.create");
     if (item === "COBRO") return can("checkout.create") || can("money.create");
-    if (item === "OBLIGACIONES") return can("obligations.manage");
+    if (item === "OBLIGACIONES") return can("obligations.manage") || can("obligations.pay");
     if (item === "CORRECCIONES") return can("corrections.create") || can("money.refund");
     return true; // S33 siempre accesible para consultar el intento original
   });
@@ -292,6 +293,9 @@ function SalesPanel({ can, onChange, onError, dirty, token }: PanelProps) {
             </dl>
             <div className="finance-actions">
               {sale.status === "DRAFT" && can("sales.confirm") && <button type="button" onClick={() => confirm(sale)}>Confirmar</button>}
+              {sale.status === "CONFIRMED" && sale.balance !== "SETTLED" && can("checkout.create") && (
+                <Link className="button secondary" href={`/cobro?sale=${sale.id}`}>Cobrar venta</Link>
+              )}
               {sale.status !== "CANCELLED" && can("sales.cancel") && <button type="button" className="danger" onClick={() => cancel(sale)}>Anular</button>}
             </div>
           </article>
@@ -315,7 +319,13 @@ function CheckoutPanel({ can, onChange, onError, onUnknown, dirty, token }: Pane
   const [deliver, setDeliver] = useState(true);
 
   const load = useCallback(() => {
-    financeApi.sales().then((items) => { setSales(items); setSaleId((current) => current || items[0]?.id || ""); }).catch(() => undefined);
+    financeApi.sales().then((items) => {
+      const available = items.filter((sale) => sale.status === "CONFIRMED" && sale.balance !== "SETTLED");
+      const target = new URLSearchParams(window.location.search).get("sale");
+      setSales(available);
+      setSaleId((current) => available.some((sale) => sale.id === current) ? current
+        : available.find((sale) => sale.id === target)?.id ?? available[0]?.id ?? "");
+    }).catch(() => undefined);
     financeApi.checkouts().then(setCheckouts).catch(() => undefined);
     financeApi.cashSessions().then((items) => {
       setCashSessions(items);
@@ -356,7 +366,7 @@ function CheckoutPanel({ can, onChange, onError, onUnknown, dirty, token }: Pane
       {can("checkout.create") && <div className="finance-form">
         <label>Venta <select value={saleId} onChange={(event) => { setSaleId(event.target.value); dirty(true); }}>
           {sales.length === 0 && <option value="">Sin ventas</option>}
-          {sales.map((sale) => <option key={sale.id} value={sale.id}>{sale.id.slice(0, 8)} · {formatARS(sale.totalMinor)} · {sale.balance}</option>)}
+          {sales.map((sale) => <option key={sale.id} value={sale.id}>{sale.lines.map((line) => line.name).join(" + ")} · {formatARS(sale.totalMinor)} · {sale.balance}</option>)}
         </select></label>
         <label>Efectivo <input inputMode="numeric" value={cashAmount} onChange={(event) => { setCashAmount(event.target.value); dirty(true); }} /></label>
         <label>Caja <select value={cashSessionId} onChange={(event) => { setCashSessionId(event.target.value); dirty(true); }}>
@@ -399,12 +409,11 @@ function ObligationsPanel({ can, onChange, onError, dirty, token }: PanelProps) 
   const [title, setTitle] = useState("");
   const [counterparty, setCounterparty] = useState("");
   const [amount, setAmount] = useState("");
-  const [payTarget, setPayTarget] = useState("");
-  const [payMoney, setPayMoney] = useState("");
+  const [paymentSources, setPaymentSources] = useState<Record<string, string>>({});
 
   const load = useCallback(() => {
     financeApi.obligations().then(setObligations).catch(() => setObligations([]));
-    financeApi.moneyOperations().then((items) => { setMoney(items.filter((item) => item.status === "SUCCEEDED" && item.availableMinor > 0)); }).catch(() => undefined);
+    financeApi.moneyOperations().then((items) => { setMoney(items.filter((item) => item.kind === "PAYMENT" && item.status === "SUCCEEDED" && item.availableMinor > 0)); }).catch(() => undefined);
   }, []);
   useEffect(() => { load(); }, [load, token]);
 
@@ -421,13 +430,14 @@ function ObligationsPanel({ can, onChange, onError, dirty, token }: PanelProps) 
   };
 
   const pay = async (obligation: ObligationView) => {
-    const operationId = stableOperationId(`obligation-pay-${obligation.id}-${payMoney}`);
+    const sourceId = paymentSources[obligation.id];
+    const operationId = stableOperationId(`obligation-pay-${obligation.id}-${sourceId}`);
     try {
-      const source = money.find((item) => item.id === payMoney);
+      const source = money.find((item) => item.id === sourceId);
       if (!source) throw new Error("Elegí una operación de dinero confirmado.");
-      const payable = obligation.balanceMinor ?? source.availableMinor;
-      await financeApi.payObligation(obligation.id, { moneyOperationId: payMoney, amountMinor: Math.min(payable, source.availableMinor) }, operationId);
-      onChange("Pago aplicado sobre dinero ya confirmado.", operationId); load();
+      const balance = obligation.balanceMinor ?? source.availableMinor;
+      await financeApi.payObligation(obligation.id, { moneyOperationId: source.id, amountMinor: Math.min(balance, source.availableMinor) }, operationId);
+      onChange(obligation.kind === "RECEIVABLE" ? "Cobro aplicado sobre dinero ya confirmado." : "Pago aplicado sobre dinero ya confirmado.", operationId); load();
     } catch (error) { onError(error, operationId); }
   };
 
@@ -446,16 +456,17 @@ function ObligationsPanel({ can, onChange, onError, dirty, token }: PanelProps) 
           <article key={obligation.id} className="finance-card" data-testid="obligation-card">
             <header><strong>{obligation.title}</strong><span className={`pill ${obligation.status.toLowerCase()}`}>{obligation.status}</span></header>
             <dl>
+              <div><dt>Tipo</dt><dd>{obligation.kind === "RECEIVABLE" ? "Por cobrar" : "Por pagar"}</dd></div>
               <div><dt>Contraparte</dt><dd>{obligation.counterpartyName}</dd></div>
               <div><dt>Importe</dt><dd>{obligation.amountState === "UNKNOWN_AMOUNT" ? "Desconocido (≠ 0)" : formatARS(obligation.amountMinor)}</dd></div>
               <div><dt>Saldo</dt><dd>{obligation.balanceMinor === null ? "Desconocido" : formatARS(obligation.balanceMinor)}</dd></div>
             </dl>
-            {can("obligations.pay") && obligation.status !== "SETTLED" && <div className="finance-form">
-              <label>Dinero confirmado <select value={payTarget || payMoney} onChange={(event) => { setPayTarget(event.target.value); setPayMoney(event.target.value); dirty(true); }}>
+            {can("obligations.pay") && ["OPEN", "PARTIAL"].includes(obligation.status) && <div className="finance-form">
+              <label>Dinero confirmado <select value={paymentSources[obligation.id] ?? ""} onChange={(event) => { const id = event.target.value; setPaymentSources((sources) => ({ ...sources, [obligation.id]: id })); dirty(true); }}>
                 <option value="">Elegir operación</option>
                 {money.map((item) => <option key={item.id} value={item.id}>{formatARS(item.availableMinor)} disponible</option>)}
               </select></label>
-              <button type="button" onClick={() => pay(obligation)}>Aplicar pago</button>
+              <button type="button" onClick={() => pay(obligation)}>{obligation.kind === "RECEIVABLE" ? "Aplicar cobro" : "Aplicar pago"}</button>
             </div>}
           </article>
         ))}

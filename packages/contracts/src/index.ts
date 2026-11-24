@@ -248,7 +248,7 @@ export type DomainErrorCode = "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "V
   // ─────────────────────────────────────────────────────────────────────────
   // H08 · Economía del personal. `NOT_CONFIGURED` es un estado de dato
   // (acuerdo incompleto/inexistente), NUNCA un importe cero ni un fallback.
-  | "AGREEMENT_NOT_FOUND" | "NOT_CONFIGURED" | "AGREEMENT_OVERLAP"
+  | "AGREEMENT_NOT_FOUND" | "NOT_CONFIGURED" | "AGREEMENT_OVERLAP" | "ESTIMATE_CHANGED"
   | "ECONOMY_FORBIDDEN" | "SETTLEMENT_CONFLICT" | "SOURCE_ALREADY_SETTLED"
   | "PERIOD_INVALID" | "AMOUNT_OUT_OF_RANGE" | "SNAPSHOT_IMMUTABLE"
   | "ADJUSTMENT_INVALID" | "OBLIGATION_KIND_INVALID";

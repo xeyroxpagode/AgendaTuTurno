@@ -12,6 +12,8 @@ export type EconomicSource = {
   commissionMinor: bigint;
   versionId: string | null;
   versionNote: string;
+  collectedOperations?: string[];
+  refundOperations?: string[];
 };
 
 type SaleRow = {
@@ -48,7 +50,7 @@ export async function eligibleSources(
       join econ.agreement_versions v on v.business_id=ag.business_id and v.agreement_id=ag.id
       where ag.business_id=a.business_id and ag.staff_member_id=a.attended_by_staff_member_id
         and ag.status='ACTIVE' and v.status='ACTIVE'
-        and v.valid_from <= a.started_at and v.valid_to > a.started_at
+        and v.valid_from <= a.started_at and v.valid_to > a.started_at and v.created_at <= a.started_at
       order by v.valid_from desc, v.version desc limit 1
     ) v on true
     where a.business_id=${businessId} and a.attended_by_staff_member_id=${staffMemberId}
@@ -60,6 +62,8 @@ export async function eligibleSources(
   const result: EconomicSource[] = [];
   for (const sale of sales) {
     const lineTotal = parseMinor(sale.line_total_minor);
+    if (sale.version_id && (sale.modality === "FIXED" || sale.modality === "CHAIR_RENT"
+        || (sale.modality === "MIXED" && sale.commission_base === null && sale.bps === null))) continue;
     if (!sale.version_id || sale.commission_base === null || sale.bps === null) {
       // Un acuerdo incompleto NO se convierte en importe cero.
       result.push({
@@ -71,21 +75,31 @@ export async function eligibleSources(
       continue;
     }
     let base = lineTotal;
+    let collectedOperations: string[] | undefined;
+    let refundOperations: string[] | undefined;
     if (sale.commission_base === "COLLECTED") {
       const [collected] = await tx`
-        select coalesce(sum(ma.amount_minor),0)::text amount
+        select coalesce(sum(ma.amount_minor),0)::text amount, coalesce(array_agg(distinct mo.id order by mo.id),array[]::uuid[]) operations
         from money.money_allocations ma join money.money_operations mo
-          on mo.business_id=ma.business_id and mo.id=ma.money_operation_id and mo.status='SUCCEEDED'
-        where ma.business_id=${businessId} and ma.target_type='SALE' and ma.target_id=${sale.sale_id}` as unknown as { amount: string }[];
+          on mo.business_id=ma.business_id and mo.id=ma.money_operation_id and mo.status='SUCCEEDED' and mo.kind='PAYMENT'
+        where ma.business_id=${businessId} and ma.target_type='SALE' and ma.target_id=${sale.sale_id}` as unknown as { amount: string; operations: string[] }[];
       // H05 registra REFUND con `refund_of_id` hacia el PAGO ORIGINAL y NO con
       // sale_id. Resolver el linaje: refund -> pago original -> sale_id.
       const [refunded] = await tx`
-        select coalesce(sum(r.amount_minor),0)::text amount
+        select coalesce(sum(r.amount_minor),0)::text amount, coalesce(array_agg(r.id order by r.id),array[]::uuid[]) operations
         from money.money_operations r
         join money.money_operations origin
           on origin.business_id=r.business_id and origin.id=r.refund_of_id
         where r.business_id=${businessId} and r.kind='REFUND' and r.status='SUCCEEDED'
-          and (origin.sale_id=${sale.sale_id} or r.sale_id=${sale.sale_id})` as unknown as { amount: string }[];
+          and (origin.sale_id=${sale.sale_id} or r.sale_id=${sale.sale_id} or (
+            origin.sale_id is null and origin.confirmed_minor=(
+              select sum(a.amount_minor) from money.money_allocations a
+               where a.business_id=origin.business_id and a.money_operation_id=origin.id
+                 and a.target_type='SALE' and a.target_id=${sale.sale_id}
+            )
+          ))` as unknown as { amount: string; operations: string[] }[];
+      collectedOperations = collected!.operations;
+      refundOperations = refunded!.operations;
       const net = parseMinor(collected!.amount) - parseMinor(refunded!.amount);
       base = net <= 0n ? 0n : (net > lineTotal ? lineTotal : net);
     }
@@ -93,7 +107,7 @@ export async function eligibleSources(
       sourceType: "SALE", sourceId: String(sale.sale_id), saleId: String(sale.sale_id),
       attendanceId: String(sale.attendance_id), occurredAt: new Date(sale.occurred_at),
       lineTotalMinor: lineTotal, baseMinor: base, commissionMinor: commissionMinor(base, sale.bps),
-      versionId: String(sale.version_id), versionNote: sale.terms_hash ?? "NO_TERMS_HASH"
+      versionId: String(sale.version_id), versionNote: sale.terms_hash ?? "NO_TERMS_HASH", collectedOperations, refundOperations
     });
   }
   return result;

@@ -49,7 +49,7 @@ async function loadServices(client: SqlClient, businessId: string, serviceIds: s
   });
 }
 
-async function loadBaseBusinessIntervals(client: SqlClient, businessId: string, localDate: string): Promise<CanonicalInterval[]> {
+export async function loadBaseBusinessIntervals(client: SqlClient, businessId: string, localDate: string): Promise<CanonicalInterval[]> {
   const [exception] = await client`select id from business.business_date_exceptions where business_id=${businessId} and local_date=${localDate}`;
   if (exception) {
     const rows = await client`select start_minute "startMinute",end_minute "endMinute" from business.business_date_exception_intervals where business_id=${businessId} and exception_id=${exception.id} order by start_minute`;
@@ -68,7 +68,7 @@ async function loadCandidateIds(client: SqlClient, businessId: string, serviceId
   return ids;
 }
 
-async function loadStaffBase(client: SqlClient, businessId: string, staffMemberId: string, localDate: string): Promise<CanonicalInterval[]> {
+export async function loadStaffBase(client: SqlClient, businessId: string, staffMemberId: string, localDate: string): Promise<CanonicalInterval[]> {
   const [exception] = await client`select id from team.staff_date_exceptions where business_id=${businessId} and staff_member_id=${staffMemberId} and local_date=${localDate}`;
   if (exception) {
     const rows = await client`select start_minute "startMinute",end_minute "endMinute" from team.staff_date_exception_intervals where business_id=${businessId} and exception_id=${exception.id} order by start_minute`;

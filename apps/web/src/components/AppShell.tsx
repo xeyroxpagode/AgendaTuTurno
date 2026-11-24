@@ -37,7 +37,7 @@ export function AppShell({children}:{children:React.ReactNode}){
   const canSeeCash=(context?.capabilities.includes("cash.open")||context?.capabilities.includes("cash.close"))??false;
   const canSeeSales=(context?.capabilities.includes("sales.create"))??false;
   const canSeeCheckout=(context?.capabilities.includes("checkout.create"))??false;
-  const canSeeObligations=(context?.capabilities.includes("obligations.manage"))??false;
+  const canSeeObligations=context?.capabilities.some((capability)=>capability==="obligations.manage"||capability==="obligations.pay")??false;
   const canSeeCorrections=(context?.capabilities.includes("corrections.create")||context?.capabilities.includes("money.refund"))??false;
 
   useEffect(()=>{

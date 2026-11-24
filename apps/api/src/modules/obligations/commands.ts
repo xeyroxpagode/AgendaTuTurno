@@ -2,9 +2,9 @@ import {
   createObligationSchema, payObligationSchema, settleObligationSchema, updateObligationSchema, DomainError
 } from "@youngkingz/contracts";
 import type { Actor } from "../iam/authorization.js";
-import { audit, executeOperation } from "../system/operations.js";
+import { audit, executeOperation, revalidateAuthority } from "../system/operations.js";
 import { checkRevision, conflict, lockBusiness, missing, requireCapability } from "../h05/domain.js";
-import { loadObligation, obligationSnapshot, settledMinor } from "./domain.js";
+import { loadObligation, obligationPaymentScope, obligationSnapshot, settledMinor } from "./domain.js";
 import { refreshObligationStatus } from "../money/commands.js";
 
 /**
@@ -90,21 +90,25 @@ export async function payObligation(actor: Actor, obligationId: string, body: un
 
   return executeOperation({ actor, operationId, command: "obligation.pay", payload: { obligationId, ...input } }, async (tx) => {
     await lockBusiness(tx, actor.businessId);
+    // EGM R1.2: obligations.pay es sensible; revalidar autoridad DENTRO de la
+    // transacción para detectar revocación en vuelo antes de escribir dinero.
+    const scope = await obligationPaymentScope(tx, actor.businessId, obligationId);
+    await revalidateAuthority(tx, actor, "obligations.pay", scope);
     const obligation = await loadObligation(tx, actor.businessId, obligationId, true);
     if (obligation.status === "CANCELLED") throw conflict("La obligación está cancelada");
     if (obligation.status === "SETTLED") throw new DomainError("OBLIGATION_ALREADY_SETTLED", "La obligación ya está saldada", 409);
 
     // El pago NUNCA inventa dinero: consume una MoneyOperation existente.
     const [money] = await tx`
-      select id, confirmed_minor::int "confirmedMinor", status::text status
+      select id, confirmed_minor::text "confirmedMinor", status::text status, kind::text kind
         from money.money_operations
        where business_id = ${actor.businessId} and id = ${input.moneyOperationId}`;
     if (!money) throw missing("esa operación de dinero");
-    if (money.status !== "SUCCEEDED" || Number(money.confirmedMinor) <= 0) {
+    if (money.kind !== "PAYMENT" || money.status !== "SUCCEEDED" || Number(money.confirmedMinor) <= 0) {
       throw new DomainError("MONEY_NOT_CONFIRMED", "La operación de dinero no tiene dinero confirmado", 409, { status: money.status });
     }
     const [allocated] = await tx`
-      select coalesce(sum(amount_minor),0)::int total from money.money_allocations
+      select coalesce(sum(amount_minor),0)::text total from money.money_allocations
        where business_id = ${actor.businessId} and money_operation_id = ${input.moneyOperationId}`;
     const available = Number(money.confirmedMinor) - Number(allocated?.total ?? 0);
     if (input.amountMinor > available) {
@@ -153,15 +157,15 @@ export async function settleObligation(actor: Actor, obligationId: string, body:
     if (pending <= 0) throw new DomainError("OBLIGATION_ALREADY_SETTLED", "La obligación ya está saldada", 409);
 
     const [money] = await tx`
-      select id, confirmed_minor::int "confirmedMinor", status::text status
+      select id, confirmed_minor::text "confirmedMinor", status::text status, kind::text kind
         from money.money_operations
        where business_id = ${actor.businessId} and id = ${input.moneyOperationId}`;
     if (!money) throw missing("esa operación de dinero");
-    if (money.status !== "SUCCEEDED" || Number(money.confirmedMinor) <= 0) {
+    if (money.kind !== "PAYMENT" || money.status !== "SUCCEEDED" || Number(money.confirmedMinor) <= 0) {
       throw new DomainError("MONEY_NOT_CONFIRMED", "La operación de dinero no tiene dinero confirmado", 409, { status: money.status });
     }
     const [allocated] = await tx`
-      select coalesce(sum(amount_minor),0)::int total from money.money_allocations
+      select coalesce(sum(amount_minor),0)::text total from money.money_allocations
        where business_id = ${actor.businessId} and money_operation_id = ${input.moneyOperationId}`;
     const available = Number(money.confirmedMinor) - Number(allocated?.total ?? 0);
     if (available < pending) {

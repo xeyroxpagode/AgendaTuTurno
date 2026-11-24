@@ -142,7 +142,8 @@ export function AbsenceWorkspace() {
     return [...byDate.entries()];
   }, [items]);
 
-  const blocking = conflicts.filter((conflict) => conflict.reservationId && conflict.status === "CONFIRMED");
+  const blocking = conflicts.filter((conflict) => (conflict.reservationId || conflict.courseId)
+    && ["CONFIRMED", "RESCHEDULED"].includes(conflict.status ?? ""));
 
   return (
     <div className="content absence-content">
@@ -276,14 +277,14 @@ export function AbsenceWorkspace() {
 
           <div className="agenda-detail-grid">
             <div>
-              <h3>Turnos afectados</h3>
+              <h3>Turnos y cursos afectados</h3>
               {conflicts.length === 0 ? (
-                <p className="muted">Ningún turno confirmado pisa este intervalo.</p>
+                <p className="muted">No hay ocupaciones confirmadas en este intervalo.</p>
               ) : (
                 <ul className="agenda-services">
                   {conflicts.map((conflict) => (
                     <li key={conflict.allocationId}>
-                      <span>{conflict.customerName ?? "Cliente"} · {conflict.serviceNames.join(" · ") || "Sin servicios"}</span>
+                      <span>{conflict.courseId ? `Curso · ${conflict.courseTitle}` : `${conflict.customerName ?? "Cliente"} · ${conflict.serviceNames.join(" · ") || "Sin servicios"}`}</span>
                       <span className="muted">{timeOf(conflict.startsAt ?? conflict.visibleStartAt)}</span>
                     </li>
                   ))}
@@ -291,7 +292,7 @@ export function AbsenceWorkspace() {
               )}
               {blocking.length > 0 && (
                 <div className="notice error" role="alert">
-                  Hay {blocking.length} turno(s) confirmado(s) en el intervalo. Resolvelos en la Agenda (reasignar o cancelar) y volvé a sincronizar.
+                  Hay {blocking.length} ocupación(es) en el intervalo. Revisá los turnos en Agenda y las sesiones en Cursos. Después volvé a sincronizar.
                 </div>
               )}
             </div>

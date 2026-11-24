@@ -10,7 +10,7 @@ import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../../apps/api/src/app";
 import { database } from "../../../apps/api/src/lib/runtime";
-import { seedBookingBusiness, type BookingSeed } from "./booking-fixtures";
+import { nextBookingWednesday, seedBookingBusiness, type BookingSeed } from "./booking-fixtures";
 // createIntent no longer needed - tests use static verification instead
 
 let app: FastifyInstance;
@@ -28,7 +28,7 @@ describe("H03.U04 DomainError codes huérfanos (coverage complementaria)", () =>
       method: "POST",
       url: `/v1/public/businesses/${seed.business}/booking-quotes`,
       headers: { "content-type": "application/json" },
-      payload: { serviceIds: [seed.serviceCut], professionalPreference: { type: "SPECIFIC", staffMemberId: seed.staffA }, localDate: "2026-11-18", visibleStart: "13:30" },
+      payload: { serviceIds: [seed.serviceCut], professionalPreference: { type: "SPECIFIC", staffMemberId: seed.staffA }, localDate: nextBookingWednesday(), visibleStart: "13:30" },
     });
     expect(quoteRes.statusCode).toBe(200);
     const _quoteBody = quoteRes.json() as { quote: string };
@@ -86,7 +86,7 @@ describe("H03.U04 DomainError codes huérfanos (coverage complementaria)", () =>
       method: "POST",
       url: `/v1/public/businesses/${businessNoPolicy}/booking-quotes`,
       headers: { "content-type": "application/json" },
-      payload: { serviceIds: [seed.serviceCut], professionalPreference: { type: "SPECIFIC", staffMemberId: seed.staffA }, localDate: "2026-11-18", visibleStart: "13:30" },
+      payload: { serviceIds: [seed.serviceCut], professionalPreference: { type: "SPECIFIC", staffMemberId: seed.staffA }, localDate: nextBookingWednesday(), visibleStart: "13:30" },
     });
     expect(quoteRes.statusCode).toBe(409);
   });

@@ -33,6 +33,11 @@ export async function createSale(actor: Actor, body: unknown, operationId: strin
     payload: { ...input, internal: internal ?? null }
   }, async (tx) => {
     await lockBusiness(tx, actor.businessId);
+    if (input.attendanceId) {
+      const [existing] = await tx`select id from sales.sales where business_id=${actor.businessId}
+        and attendance_id=${input.attendanceId} and status<>'CANCELLED'`;
+      if (existing) throw conflict("Esta atención ya tiene una venta activa. Buscala en Ventas.");
+    }
     const resolved = await resolveSaleLines(tx, actor, input,
       internal?.confirmedOrderId ? { confirmedOrderId: internal.confirmedOrderId } : undefined);
     assertDiscountAuthority(actor, resolved.lines);

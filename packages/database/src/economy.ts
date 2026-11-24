@@ -1,4 +1,4 @@
-import { bigint, index, jsonb, pgSchema, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, index, integer, jsonb, pgSchema, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /** H08 · M8 · Espejo Drizzle de `econ.*`. Importes en unidades menores (bigint). */
 export const econSchema = pgSchema("econ");
@@ -18,12 +18,13 @@ export const agreementVersions = econSchema.table("agreement_versions", {
   id: uuid("id").primaryKey(),
   businessId: uuid("business_id").notNull(),
   agreementId: uuid("agreement_id").notNull(),
-  version: bigint("version", { mode: "number" }).notNull(),
+  version: integer("version").notNull(),
   modality: text("modality").notNull(),
   commissionBase: text("commission_base"),
-  bps: bigint("bps", { mode: "number" }),
-  fixedAmountMinor: bigint("fixed_amount_minor", { mode: "number" }),
-  rentAmountMinor: bigint("rent_amount_minor", { mode: "number" }),
+  bps: integer("bps"),
+  fixedAmountMinor: bigint("fixed_amount_minor", { mode: "bigint" }),
+  rentAmountMinor: bigint("rent_amount_minor", { mode: "bigint" }),
+  periodCadence: jsonb("period_cadence"),
   validFrom: timestamp("valid_from", { withTimezone: true }).notNull(),
   validTo: timestamp("valid_to", { withTimezone: true }).notNull(),
   termsHash: text("terms_hash").notNull(),
@@ -42,8 +43,8 @@ export const estimates = econSchema.table("estimates", {
   agreementVersionId: uuid("agreement_version_id"),
   termsHash: text("terms_hash"),
   sourceFingerprint: text("source_fingerprint").notNull(),
-  totalPayableMinor: bigint("total_payable_minor", { mode: "number" }).notNull(),
-  totalReceivableMinor: bigint("total_receivable_minor", { mode: "number" }).notNull(),
+  totalPayableMinor: bigint("total_payable_minor", { mode: "bigint" }).notNull(),
+  totalReceivableMinor: bigint("total_receivable_minor", { mode: "bigint" }).notNull(),
   lines: jsonb("lines").notNull(),
   state: text("state").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull()
@@ -60,8 +61,8 @@ export const settlements = econSchema.table("settlements", {
   agreementVersionId: uuid("agreement_version_id"),
   termsHash: text("terms_hash").notNull(),
   sourceFingerprint: text("source_fingerprint").notNull(),
-  totalPayableMinor: bigint("total_payable_minor", { mode: "number" }).notNull(),
-  totalReceivableMinor: bigint("total_receivable_minor", { mode: "number" }).notNull(),
+  totalPayableMinor: bigint("total_payable_minor", { mode: "bigint" }).notNull(),
+  totalReceivableMinor: bigint("total_receivable_minor", { mode: "bigint" }).notNull(),
   snapshot: jsonb("snapshot").notNull(),
   payableObligationId: uuid("payable_obligation_id"),
   receivableObligationId: uuid("receivable_obligation_id"),
@@ -77,14 +78,15 @@ export const settlementSources = econSchema.table("settlement_sources", {
   sourceType: text("source_type").notNull(),
   sourceId: uuid("source_id").notNull(),
   component: text("component").notNull(),
-  amountMinor: bigint("amount_minor", { mode: "number" }).notNull()
+  amountMinor: bigint("amount_minor", { mode: "bigint" }).notNull()
 });
 
 export const settlementAdjustments = econSchema.table("settlement_adjustments", {
   id: uuid("id").primaryKey(),
   businessId: uuid("business_id").notNull(),
   settlementId: uuid("settlement_id").notNull(),
-  amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
+  obligationKind: text("obligation_kind"),
+  amountMinor: bigint("amount_minor", { mode: "bigint" }).notNull(),
   reason: text("reason").notNull(),
   sourceType: text("source_type"),
   sourceId: uuid("source_id"),

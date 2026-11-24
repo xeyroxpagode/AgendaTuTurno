@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { afterAll,beforeAll,describe,expect,it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../../apps/api/src/app";
+import { seedStaffAgendaBusiness } from "./staff-agenda-fixtures";
 import { database } from "../../../apps/api/src/lib/runtime";
 
 const supabaseUrl=process.env.SUPABASE_URL??"http://127.0.0.1:55321";
@@ -22,10 +23,20 @@ const request=(token:string,method:string,url:string,payload?:unknown)=>app.inje
 beforeAll(async()=>{
   if(!anonKey)throw new Error("SUPABASE_ANON_KEY is required");
   app=await buildApp();
+  const fixture = await seedStaffAgendaBusiness("Disponibilidad API QA");
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is required");
+  const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+  const createActor = async (accountId: string) => {
+    const email = `availability-${accountId}@example.test`;
+    const password = `Qa-${randomUUID()}!x`;
+    const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+    if (error) throw error;
+    await database.client`update iam.user_accounts set auth_user_id=${data.user.id}, verified_email=${email} where id=${accountId}`;
+    return signIn(email, password);
+  };
   [ownerToken,receptionToken,barberToken]=await Promise.all([
-    signIn("owner@youngkingz.local","YoungKingZ-Owner-2026!"),
-    signIn("receptionist@youngkingz.local","YoungKingZ-Reception-2026!"),
-    signIn("barber@youngkingz.local","YoungKingZ-Barber-2026!")
+    createActor(fixture.ownerAccount), createActor(fixture.receptionistAccount), createActor(fixture.barberAccount)
   ]);
 });
 afterAll(async()=>{await app.close();});

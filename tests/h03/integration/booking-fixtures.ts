@@ -24,6 +24,17 @@ export type BookingSeed = {
 export const FIXTURE_DATE = "2026-11-04";
 export const FIXTURE_TIMEZONE = "America/Argentina/Buenos_Aires";
 
+// Keep the weekday and cutoff invariant while moving test dates with the clock.
+export function nextBookingWednesday(weeksAhead = 0): string {
+  const localToday = new Intl.DateTimeFormat("en-CA", {
+    timeZone: FIXTURE_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit"
+  }).format(new Date());
+  const date = new Date(localToday + "T00:00:00Z");
+  const days = (3 - date.getUTCDay() + 7) % 7 || 7;
+  date.setUTCDate(date.getUTCDate() + days + weeksAhead * 7);
+  return date.toISOString().slice(0, 10);
+}
+
 export async function seedBookingBusiness(label: string): Promise<BookingSeed> {
   const ids = {
     business: randomUUID(),

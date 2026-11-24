@@ -8,13 +8,19 @@ export type AgreementVersion = {
   validFrom: string; validTo: string; termsHash: string; status: string;
 };
 export type Estimate = {
-  state: string; payableMinor: string; receivableMinor: string; sourceFingerprint: string;
+  sourceFingerprint: string;
   agreementVersionId: string | null; termsHash: string | null;
   lines: Array<{ sourceType: string; sourceId: string; component: string; amountMinor: string; versionNote: string }>;
-};
+} & ({ state: "NOT_CONFIGURED"; payableMinor: null; receivableMinor: null }
+  | { state: "OPEN_ESTIMATE"; payableMinor: string; receivableMinor: string });
 export type Settlement = {
   id: string; periodStart: string; periodEnd: string; status: string;
   payableMinor: string; receivableMinor: string; closedAt: string;
+  snapshot?: {
+    terms?: { agreementVersionId?: string; versions?: Array<{ id: string; termsHash: string }> };
+    sources?: Array<{ sourceType: string; sourceId: string; component: string; amountMinor: string;
+      basis?: { baseMinor: string } }>;
+  };
 };
 
 export const economyApi = {
@@ -38,5 +44,12 @@ export const economyApi = {
 };
 
 export function formatARS(minor: string | number): string {
-  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(Number(minor) / 100);
+  const amount = BigInt(minor);
+  const hundred = BigInt(100);
+  const zero = BigInt(0);
+  const whole = amount / hundred;
+  const fraction = ((amount < zero ? -amount : amount) % hundred).toString().padStart(2, "0");
+  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" })
+    .formatToParts(whole === zero && amount < zero ? -0 : whole)
+    .map((part) => part.type === "fraction" ? fraction : part.value).join("");
 }

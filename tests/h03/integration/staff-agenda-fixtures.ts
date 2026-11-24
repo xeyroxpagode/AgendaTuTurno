@@ -8,7 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { database } from "../../../apps/api/src/lib/runtime";
 import type { Tx } from "../../../apps/api/src/modules/system/operations";
-import { FIXTURE_TIMEZONE } from "./booking-fixtures";
+import { FIXTURE_TIMEZONE, nextBookingWednesday } from "./booking-fixtures";
 
 export type StaffAgendaSeed = {
   business: string;
@@ -30,7 +30,7 @@ export type StaffAgendaSeed = {
 /** Fecha local del fixture: un día anterior (miércoles) para poder simular horas pasadas. */
 export const STAFF_FIXTURE_DATE = "2026-11-04";
 /** Fecha local futura (miércoles) para las operaciones que exigen horario por delante. */
-export const STAFF_CREATE_DATE = "2026-11-18";
+export const STAFF_CREATE_DATE = nextBookingWednesday();
 
 /**
  * Crea un Business con tres profesionales (owner, recepción, barbero), dos

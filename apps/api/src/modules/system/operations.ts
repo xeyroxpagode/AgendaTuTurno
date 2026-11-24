@@ -277,8 +277,8 @@ export async function revalidateAuthority(tx: Tx, actor: Actor, capability: Capa
     select 1 from team.staff_members sm
     join iam.user_accounts ua on ua.person_id = sm.person_id
     where sm.id = ${actor.staffMemberId} and sm.business_id = ${actor.businessId}
-      and ua.id = ${actor.accountId} and sm.access_status = 'ACTIVE'
-      and sm.employment_status <> 'INACTIVE'
+      and ua.id = ${actor.accountId} and ua.status='ACTIVE' and sm.access_status = 'ACTIVE'
+      and sm.employment_status = 'ACTIVE'
     for share of sm, ua`;
   if (!identity.length) throw new DomainError("FORBIDDEN", "Authority is no longer valid for this business", 403);
 
@@ -293,7 +293,9 @@ export async function revalidateAuthority(tx: Tx, actor: Actor, capability: Capa
   const sessionRows = await tx`
     select id from iam.access_sessions
     where id = ${actor.accessSessionId} and business_id = ${actor.businessId}
-      and account_id = ${actor.accountId} and revoked_at is null
+      and account_id = ${actor.accountId} and staff_member_id=${actor.staffMemberId}
+      and active_role_assignment_id=${actor.roleAssignmentId}
+      and context_revision=${actor.contextRevision} and revoked_at is null and expires_at > clock_timestamp()
     for share`;
   if (!sessionRows.length) throw new DomainError("SESSION_REVOKED", "Operational session was revoked", 401);
 
@@ -309,7 +311,10 @@ export async function revalidateAuthority(tx: Tx, actor: Actor, capability: Capa
       and (expires_at is null or expires_at > now())
     for share`;
   if (!grantRows.length) throw new DomainError("FORBIDDEN", `Missing capability: ${capability}`, 403);
-  if (scope?.staffMemberId && !grantRows.some((grant) => (grant.scope as { staffMemberId?: string } | null)?.staffMemberId === scope.staffMemberId)) {
+  if (!grantRows.some((grant) => {
+    const target = (grant.scope as { staffMemberId?: string } | null)?.staffMemberId;
+    return !target || target === scope?.staffMemberId;
+  })) {
     throw new DomainError("ECONOMY_FORBIDDEN", `Capability ${capability} is not granted for the requested professional`, 403);
   }
 }

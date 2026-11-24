@@ -191,6 +191,7 @@ export async function registerAttendance(input: RegisterAttendanceInput): Promis
     let clientProfileId: string | null = null;
     let contactSnapshot: unknown = null;
     let startedAt = new Date();
+    let services = input.servicesPerformedSnapshot ?? null;
 
     if (!walkIn) {
       const reservationId = input.reservationId!;
@@ -216,6 +217,14 @@ export async function registerAttendance(input: RegisterAttendanceInput): Promis
       clientProfileId = (reservation.clientProfileId as string | null) ?? null;
       contactSnapshot = reservation.contactSnapshot;
       if (input.startedAt) startedAt = new Date(input.startedAt);
+      if (services?.some((service) => service.serviceId)) {
+        const booked = await tx`select service_id "serviceId", service_name_snapshot name, price_minor::int "priceMinor"
+          from booking.reservation_items where business_id=${businessId} and reservation_id=${reservationId}`;
+        services = services.map((service) => {
+          const original = booked.find((item) => item.serviceId === service.serviceId);
+          return original ? { ...service, name: String(original.name), priceMinor: Number(original.priceMinor), currency: "ARS" } : service;
+        });
+      }
     } else {
       // Walk-in: contacto mínimo obligatorio. No se crea ni se vincula ficha CRM.
       contactSnapshot = { name: input.contactSnapshot!.name, phone: input.contactSnapshot!.phone, email: input.contactSnapshot!.email ?? null };
@@ -235,7 +244,6 @@ export async function registerAttendance(input: RegisterAttendanceInput): Promis
     }
 
     const terminal = input.status ?? null;
-    const services = input.servicesPerformedSnapshot ?? null;
     if (terminal && !services) {
       throw new DomainError("VALIDATION_ERROR", "A terminal attendance requires the performed services", 400);
     }

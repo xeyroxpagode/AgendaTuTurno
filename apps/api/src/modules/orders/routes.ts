@@ -5,7 +5,7 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { DomainError, orderRequestInput, orderQuerySchema } from "@youngkingz/contracts";
+import { DomainError, orderRequestInput } from "@youngkingz/contracts";
 import { operationId } from "../system/operations.js";
 import { authenticateH05, actorOf } from "../h05/routes.js";
 import { resolveProviderIdentity } from "../client-auth/provider.js";

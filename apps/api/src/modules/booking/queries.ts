@@ -88,10 +88,22 @@ export async function listStaffAgenda(actor: Actor, query: AgendaQuery) {
      order by r.starts_at asc, r.id asc
      limit ${query.limit + 1}`);
 
+  const courseOccupancy = query.status === "ALL" || query.status === "CONFIRMED" ? await rows(sql`
+    select a.source_id id, a.staff_member_id "staffMemberId", a.local_date "localDate",
+           a.visible_start_at "startsAt", a.visible_end_at "endsAt", c.title
+    from availability.resource_allocations a
+    join courses.course_sessions s on s.business_id=a.business_id and s.id=a.source_id
+    join courses.courses c on c.business_id=s.business_id and c.id=s.course_id
+    where a.business_id=${actor.businessId} and a.source_type='COURSE_SESSION' and a.status='ACTIVE'
+      ${effectiveStaff ? sql`and a.staff_member_id=${effectiveStaff}` : sql``}
+      ${query.fromDate ? sql`and a.local_date>=${query.fromDate}` : sql``}
+      ${query.toDate ? sql`and a.local_date<=${query.toDate}` : sql``}
+    order by a.visible_start_at,a.id limit ${query.limit}`) : [];
   const page = items.slice(0, query.limit);
   const last = page.at(-1);
   return {
     items: page,
+    courseOccupancy,
     nextCursor: items.length > query.limit && last ? encodeCursor(last.startsAt, last.id) : null,
   };
 }

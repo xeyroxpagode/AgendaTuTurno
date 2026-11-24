@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { ApiError } from "@/lib/api/client";
@@ -10,9 +11,7 @@ type PublicService = {
   id: string;
   name: string;
   priceMinor: number;
-  durationMin: number;
-  preBufferMin: number;
-  postBufferMin: number;
+  durationMinutes: number;
   conditions: string | null;
 };
 type PublicProfessional = { id: string; name: string };
@@ -24,6 +23,9 @@ function localClock(iso: string, timeZone: string): string {
 
 export default function PublicBookingPage() {
   const [businessId, setBusinessId] = useState("");
+  const [businesses, setBusinesses] = useState<Array<{ id: string; name: string }>>([]);
+  const [directoryError, setDirectoryError] = useState(false);
+  const [directoryReady, setDirectoryReady] = useState(false);
   const [identity, setIdentity] = useState<"guest" | "client" | "client-mfa" | "restricted">("guest");
   const [services, setServices] = useState<PublicService[]>([]);
   const [professionals, setProfessionals] = useState<PublicProfessional[]>([]);
@@ -43,7 +45,18 @@ const [showToken, setShowToken] = useState(false);
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("businessId");
-    if (id) setBusinessId(id);
+    if (id) {
+      setBusinessId(id);
+      return;
+    }
+    fetch(`${API}/v1/public/booking-businesses`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Directory unavailable");
+        const directory = await response.json() as { businesses: Array<{ id: string; name: string }> };
+        setBusinesses(directory.businesses);
+      })
+      .catch(() => setDirectoryError(true))
+      .finally(() => setDirectoryReady(true));
   }, []);
   useEffect(() => {
     void (async () => {
@@ -92,7 +105,12 @@ const [showToken, setShowToken] = useState(false);
   };
 
   const loadSlots = async () => {
-    if (!businessId || selected.length === 0 || !date) return;
+    if (!businessId || selected.length === 0 || !date) {
+      setSlots([]);
+      return;
+    }
+    setMessage("");
+    setSlots([]);
     setStatus("loading");
     try {
       const res = await fetch(`${API}/v1/public/businesses/${businessId}/availability/search`, {
@@ -188,7 +206,7 @@ const [showToken, setShowToken] = useState(false);
     const res = await fetch(`${API}/v1/public/businesses/${businessId}/reservations`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-operation-id": opId },
-      body: JSON.stringify({ quote: quote.token, intentId: intent.intentId, intentProof: intent.proof, contact, acceptTerms: true }),
+      body: JSON.stringify({ quote: quote.token, intentId: intent.intentId, intentProof: intent.proof, contact: { ...contact, email: contact.email.trim() || undefined }, acceptTerms: true }),
     });
     const data = await res.json() as { reservationId?: string; status?: string; error?: { message: string } };
     if (!res.ok || !data.reservationId) { setMessage(data.error?.message ?? "No se pudo confirmar"); setStatus("error"); return; }
@@ -216,17 +234,25 @@ const [showToken, setShowToken] = useState(false);
   return (
     <main style={{ padding: 24, maxWidth: 720, margin: "0 auto", fontFamily: "system-ui" }}>
       <h1>Reservar turno</h1>
-      <label>Negocio (UUID)<br /><input value={businessId} onChange={(e) => setBusinessId(e.target.value)} style={{ width: "100%" }} /></label>
+      {businessId && <Link href={`/cursos/publicos?businessId=${encodeURIComponent(businessId)}`}>Ver cursos de la barbería</Link>}
+      {!businessId && directoryReady && (
+        directoryError ? <p role="alert">No se pudieron cargar las barberías.</p>
+          : businesses.length === 0 ? <p>No hay barberías con reservas abiertas.</p>
+          : <label>Barbería <select value="" onChange={(event) => setBusinessId(event.target.value)}>
+            <option value="">Seleccioná una barbería</option>
+            {businesses.map((business) => <option key={business.id} value={business.id}>{business.name}</option>)}
+          </select></label>
+      )}
 
       <section style={{ marginTop: 16 }}>
         <h2>1. Servicios publicados</h2>
         {services.length === 0 && (
-          <p style={{ color: "#666" }}>Ingresá el ID del negocio para cargar sus servicios publicados.</p>
+          <p style={{ color: "#666" }}>{businessId ? "No hay servicios publicados." : "Elegí una barbería para consultar sus servicios."}</p>
         )}
         {services.map((s) => (
           <label key={s.id} style={{ display: "block", marginBottom: 6 }}>
             <input type="checkbox" checked={selected.includes(s.id)} onChange={() => toggleService(s.id)} />
-            {s.name} — {s.priceMinor / 100} {quote ? quote.currency : "ARS"} · {s.durationMin} min
+            {s.name} — {s.priceMinor / 100} {quote ? quote.currency : "ARS"} · {s.durationMinutes} min
             {s.conditions && <span style={{ fontSize: 12, color: "#666", marginLeft: 8 }}>{s.conditions}</span>}
           </label>
         ))}

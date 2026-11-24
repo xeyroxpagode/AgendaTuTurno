@@ -1,13 +1,13 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
   courseSessionHistorySchema, rescheduleCourseSessionSchema, updateCourseSchema,
-  scheduleCourseSessionSchema, DomainError, type Capability
+  scheduleCourseSessionSchema, publicCourseListSchema, DomainError, type Capability
 } from "@youngkingz/contracts";
 import { operationId } from "../system/operations.js";
 import { authorizationService } from "../iam/authorization.js";
 import { createCourse, updateCourse, publishCourse, unpublishCourse, scheduleSession, cancelCourse } from "./commands.js";
 import { confirmSession, rescheduleSession, cancelSession, completeSession } from "./session-commands.js";
-import { listCourses, listSessions, sessionHistory, publicCourses } from "./repository.js";
+import { listCourses, listSessions, sessionHistory, publicCourses, publicCourseBusinesses } from "./repository.js";
 
 type PreHandler = (request: FastifyRequest) => Promise<void>;
 
@@ -99,8 +99,11 @@ export function registerCourseRoutes(app: FastifyInstance, authenticate: PreHand
 
   /** CAP-07-05 · Discovery público. Sólo PUBLICADOS; sin CTA académico. */
   app.get("/v1/public/businesses/:businessId/courses", async (request) => {
-    const { businessId } = request.params as { businessId: string };
-    return { data: await publicCourses(businessId) };
+    const parsed = publicCourseListSchema.safeParse(request.params);
+    if (!parsed.success) throw new DomainError("NOT_FOUND", "Este enlace no corresponde a una barbería activa", 404);
+    return { data: await publicCourses(parsed.data.businessId) };
   });
+
+  app.get("/v1/public/course-businesses", async () => ({ data: await publicCourseBusinesses() }));
 }
 

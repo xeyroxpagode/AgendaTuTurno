@@ -16,6 +16,7 @@ export type AgendaItem = {
   arrivedAt: string | null;
   noShowAt: string | null;
 };
+export type AgendaCourse = { id: string; staffMemberId: string; startsAt: string; endsAt: string; localDate: string; title: string };
 export type AgendaDetail = {
   reservation: {
     id: string; status: string; revision: number; staffMemberId: string;
@@ -51,7 +52,7 @@ export async function listAgenda(query: AgendaQuery = {}) {
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.limit) params.set("limit", String(query.limit));
   const suffix = params.toString();
-  return api<{ items: AgendaItem[]; nextCursor: string | null }>(`/v1/staff/bookings${suffix ? `?${suffix}` : ""}`);
+  return api<{ items: AgendaItem[]; courseOccupancy?: AgendaCourse[]; nextCursor: string | null }>(`/v1/staff/bookings${suffix ? `?${suffix}` : ""}`);
 }
 
 export const getAgendaReservation = (id: string) => api<AgendaDetail>(`/v1/staff/bookings/${id}`);

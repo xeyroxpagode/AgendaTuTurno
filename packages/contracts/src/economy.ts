@@ -33,6 +33,16 @@ export function minorToString(value: bigint): string { return assertMinorRange(v
 
 const minorInput = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
+const periodCadenceSchema = z.object({
+  unit: z.enum(["DAYS", "MONTHS"]),
+  interval: z.number().int().min(1).max(365),
+  anchorDate: z.iso.date()
+}).strict().refine((cadence) => cadence.unit !== "MONTHS" || cadence.anchorDate.endsWith("-01"), {
+  message: "El período mensual comienza el primer día del mes de referencia.", path: ["anchorDate"]
+});
+
+export type PeriodCadence = z.infer<typeof periodCadenceSchema>;
+
 export const createAgreementVersionSchema = z.object({
   staffMemberId: z.string().uuid(),
   modality: modalitySchema,
@@ -40,6 +50,7 @@ export const createAgreementVersionSchema = z.object({
   bps: z.number().int().min(0).max(10000).optional(),
   fixedAmountMinor: minorInput.optional(),
   rentAmountMinor: minorInput.optional(),
+  periodCadence: periodCadenceSchema.optional(),
   validFrom: z.string().datetime(),
   validTo: z.string().datetime()
 }).strict().superRefine((input, ctx) => {
@@ -47,6 +58,9 @@ export const createAgreementVersionSchema = z.object({
   const hasCommission = input.commissionBase !== undefined && input.bps !== undefined;
   const hasFixed = input.fixedAmountMinor !== undefined;
   const hasRent = input.rentAmountMinor !== undefined;
+  if ((hasFixed || hasRent) && !input.periodCadence) {
+    ctx.addIssue({ code: "custom", path: ["periodCadence"], message: "Elegí una periodicidad explícita para el fijo o el alquiler." });
+  }
   if (input.modality === "COMMISSION" && !hasCommission) ctx.addIssue({ code: "custom", path: ["commissionBase"], message: "COMMISSION requires an explicit base and bps (CL-08)" });
   if (input.modality === "FIXED" && !hasFixed) ctx.addIssue({ code: "custom", path: ["fixedAmountMinor"], message: "FIXED requires an explicit amount (CL-09)" });
   if (input.modality === "CHAIR_RENT" && !hasRent) ctx.addIssue({ code: "custom", path: ["rentAmountMinor"], message: "CHAIR_RENT requires an explicit amount" });
@@ -64,7 +78,8 @@ export const economyPeriodSchema = z.object({
 }).strict().refine((input) => input.to > input.from, { message: "to must be after from", path: ["to"] });
 
 export const closeSettlementSchema = economyPeriodSchema.extend({
-  confirmation: z.literal("CLOSE_SETTLEMENT")
+  confirmation: z.literal("CLOSE_SETTLEMENT"),
+  expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/)
 });
 
 export const settlementPaymentSchema = z.object({

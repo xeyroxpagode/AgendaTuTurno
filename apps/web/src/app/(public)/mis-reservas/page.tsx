@@ -93,7 +93,7 @@ export default function MisReservasPage() {
         <button onClick={consult} style={{ width: "100%" }}>Consultar reserva</button>
       </section>
 
-      {message && <p style={{ color: "crimson", marginTop: 12 }}>{message}</p>}
+      {message && status !== "success" && <p role="alert" style={{ color: "crimson", marginTop: 12 }}>{message}</p>}
 
       {reservation && (
         <section style={{ marginTop: 16, padding: 12, background: "#f0f0f0", borderRadius: 8 }}>

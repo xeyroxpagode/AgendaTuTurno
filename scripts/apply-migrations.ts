@@ -27,7 +27,11 @@ import postgres from "postgres";
 const EXPECTED_PROJECT = 'project_id = "youngkingz-h01"';
 const EXPECTED_PORT = "port = 55322";
 const LOOPBACK = /^127\.0\.0\.1$|^localhost$/i;
-const ADMIN_URL = "postgresql://postgres:postgres@127.0.0.1:55322/postgres";
+const qaPort = process.env.QA_POSTGRES_PORT ?? "55322";
+if (!/^\d+$/.test(qaPort) || Number(qaPort) < 1 || Number(qaPort) > 65535) {
+  throw new Error("QA_POSTGRES_PORT must be a valid port number.");
+}
+const ADMIN_URL = `postgresql://postgres:postgres@127.0.0.1:${qaPort}/postgres`;
 
 interface Arguments {
   database: string;
@@ -57,8 +61,8 @@ async function assertIsolatedTarget(root: string, database: string): Promise<voi
   if (!config.includes(EXPECTED_PROJECT) || !config.includes(EXPECTED_PORT)) {
     throw new Error("Target no verificado: la configuración local de Supabase no declara el proyecto aislado.");
   }
-  if (!/^youngkingz_h0[45678]_/.test(database)) {
-    throw new Error(`Refusing operation: la base '${database}' no es una base QA H04..H08 aislada.`);
+  if (!/^youngkingz_h0[1-8]_/.test(database)) {
+    throw new Error(`Refusing operation: la base '${database}' no es una base QA H01..H08 aislada.`);
   }
   const url = new URL(ADMIN_URL);
   if (!LOOPBACK.test(url.hostname)) {
@@ -134,8 +138,8 @@ async function main(): Promise<void> {
   const args = parseArguments(process.argv.slice(2));
   await assertIsolatedTarget(root, args.database);
   if (args.template) {
-    if (!/^youngkingz_h0[45678]_/.test(args.template)) {
-      throw new Error(`Refusing operation: la plantilla '${args.template}' no es una base QA H04..H08 aislada.`);
+    if (!/^youngkingz_h0[1-8]_/.test(args.template)) {
+      throw new Error(`Refusing operation: la plantilla '${args.template}' no es una base QA H01..H08 aislada.`);
     }
     await cloneDatabase(args.template, args.database);
   } else {
@@ -145,8 +149,9 @@ async function main(): Promise<void> {
   const directory = resolve(root, "supabase/migrations");
   const files = (await readdir(directory)).filter((file) => file.endsWith(".sql")).sort();
 
-  const url = `postgresql://postgres:postgres@127.0.0.1:55322/${args.database}`;
-  const sql = postgres(url, { max: 1, onnotice: () => {} });
+  const url = new URL(ADMIN_URL);
+  url.pathname = "/" + args.database;
+  const sql = postgres(url.href, { max: 1, onnotice: () => {} });
   try {
     await ensurePlatformShim(sql);
     const applied = await appliedVersions(sql);

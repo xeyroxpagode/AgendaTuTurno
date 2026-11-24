@@ -1,13 +1,19 @@
 import postgres from "postgres";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createMoneyOperation } from "../../../apps/api/src/modules/money/commands.js";
-import { database } from "../../../apps/api/src/lib/runtime.js";
+import { database, runtime } from "../../../apps/api/src/lib/runtime.js";
 import { assertQaDatabase, op, seedActor, seedBusiness } from "../support.js";
 
 /**
  * H05 · QA de base de datos y seguridad (F43–F45).
  * Verifica invariantes MATERIALIZADOS, no sólo afirmaciones declarativas.
  */
+function databaseUrlForUpgrade(): string {
+  const url = new URL(runtime.databaseUrl);
+  url.pathname = "/youngkingz_h05_upgrade_20261116";
+  return url.href;
+}
+
 describe("H05 BD, migraciones y seguridad (F43–F45)", () => {
   let owner: Actor;
 
@@ -26,7 +32,8 @@ describe("H05 BD, migraciones y seguridad (F43–F45)", () => {
   });
 
   it("F43 · ruta de upgrade H04→H05 verificada en base clon", async () => {
-    const upgrade = postgres("postgresql://postgres:postgres@127.0.0.1:55322/youngkingz_h05_upgrade_20261116", { max: 1, onnotice: () => {} });
+    const upgradeUrl = new URL(process.env.H05_UPGRADE_DATABASE_URL ?? databaseUrlForUpgrade());
+    const upgrade = postgres(upgradeUrl.href, { max: 1, onnotice: () => {} });
     try {
       const schemas = await upgrade`select table_schema from information_schema.tables where table_schema in ('sales','money','cash','obligations','checkout','corrections') group by 1 order by 1`;
       expect(schemas.map((row) => row.table_schema).sort()).toEqual(["cash", "checkout", "corrections", "money", "obligations", "sales"]);

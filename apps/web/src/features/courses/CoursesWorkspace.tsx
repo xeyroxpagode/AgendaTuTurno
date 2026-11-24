@@ -56,7 +56,7 @@ export function CoursesWorkspace() {
           } else {
             await coursesApi.create({ title, summary: summary || undefined, contactChannel, contactValue: contactValue || undefined });
           }
-          setTitle(""); setSummary(""); setContactValue("");
+          setTitle(""); setSummary(""); setContactChannel("NONE"); setContactValue("");
         }, editingId ? "Oferta actualizada" : "Borrador creado"); }} className="form-grid">
           <Field label="Título del curso" error={!title.trim() ? "Ingresá un título" : undefined}>
             <input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200} required />
@@ -76,7 +76,7 @@ export function CoursesWorkspace() {
             <input value={contactValue} onChange={(event) => setContactValue(event.target.value)} maxLength={200} required />
           </Field>}
           <Button type="submit" disabled={busy === "create" || !title.trim()}>{busy === "create" ? "Guardando…" : editingId ? "Guardar cambios" : "Guardar borrador"}</Button>
-          {editingId && <Button className="ghost" onClick={() => { setEditingId(null); setTitle(""); setSummary(""); }}>Cancelar edición</Button>}
+          {editingId && <Button type="button" className="ghost" onClick={() => { setEditingId(null); setTitle(""); setSummary(""); setContactChannel("NONE"); setContactValue(""); }}>Cancelar edición</Button>}
         </form>
       </div>
 
@@ -92,7 +92,7 @@ export function CoursesWorkspace() {
                 <div><strong>{course.title}</strong><StatusPill tone={statusTone(course.status)}>{statusLabel[course.status] ?? course.status}</StatusPill></div>
                 {course.summary && <p>{course.summary}</p>}
                 <div className="row-actions">
-                  <Button className="secondary" disabled={busy !== null} onClick={() => { setEditingId(course.id); setTitle(course.title); setSummary(course.summary ?? ""); }}>Editar</Button>
+                  <Button className="secondary" disabled={busy !== null} onClick={() => { setEditingId(course.id); setTitle(course.title); setSummary(course.summary ?? ""); setContactChannel(course.contactChannel ?? "NONE"); setContactValue(course.contactValue ?? ""); }}>Editar</Button>
                   <Link className="button secondary" href={`/cursos/${course.id}/sesiones`}>Sesiones</Link>
                   <Button disabled={busy !== null} onClick={() => void run(`publish:${course.id}`, () => coursesApi.publish(course.id), "Curso publicado")}>Publicar</Button>
                   <Button className="secondary" disabled={busy !== null} onClick={() => void run(`unpublish:${course.id}`, () => coursesApi.unpublish(course.id), "Curso despublicado")}>Despublicar</Button>

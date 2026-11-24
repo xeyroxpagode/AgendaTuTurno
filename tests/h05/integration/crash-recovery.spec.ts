@@ -19,6 +19,7 @@ describe("H05 crash recovery real (F40)", () => {
   let operationId: string;
   let reconciliationOperationId: string;
   let workerPath: string;
+  const evidenceDirectory = process.env.H05_QA_EVIDENCE_DIR ?? resolve(process.cwd(), "artifacts/h05/acceptance");
   const tsxCli = resolve(process.cwd(), "node_modules/tsx/dist/cli.mjs");
 
   beforeAll(async () => {
@@ -73,7 +74,7 @@ describe("H05 crash recovery real (F40)", () => {
   }
 
   it("F40 · el intento sobrevive al kill del proceso y se reconcilia en uno nuevo", async () => {
-    const preparedOut = resolve(process.cwd(), "artifacts/h05/acceptance/crash-prepared.json");
+    const preparedOut = resolve(evidenceDirectory, "crash-prepared.json");
     await unlink(preparedOut).catch(() => undefined);
     const { child, ready } = startPrepareWorker(preparedOut);
     const prepared = await ready;
@@ -90,13 +91,13 @@ describe("H05 crash recovery real (F40)", () => {
     child.kill("SIGKILL");
     await new Promise<void>((done) => child.on("exit", () => done()));
 
-    const queryOut = resolve(process.cwd(), "artifacts/h05/acceptance/crash-query.json");
+    const queryOut = resolve(evidenceDirectory, "crash-query.json");
     const queried = await runWorker("query", queryOut);
     expect(queried.pid).not.toBe(prepared.pid); // proceso realmente distinto
     expect(["UNKNOWN", "STARTED"]).toContain(String(queried.attempt.status));
     expect(queried.attempt.operationId).toBe(operationId);
 
-    const recoverOut = resolve(process.cwd(), "artifacts/h05/acceptance/crash-recovered.json");
+    const recoverOut = resolve(evidenceDirectory, "crash-recovered.json");
     const recovered = await runWorker("recover", recoverOut, { moneyOperationId: prepared.moneyOperationId });
     expect(recovered.pid).not.toBe(prepared.pid);
     expect(recovered.status).toBe("SUCCEEDED");
@@ -119,7 +120,7 @@ describe("H05 crash recovery real (F40)", () => {
   });
 
   it("F40 · replay con el mismo operation_id devuelve el resultado guardado", async () => {
-    const out = resolve(process.cwd(), "artifacts/h05/acceptance/crash-query-repeat.json");
+    const out = resolve(evidenceDirectory, "crash-query-repeat.json");
     const repeat = await runWorker("query", out);
     expect(repeat.attempt.status).toBe("SUCCEEDED");
     const [money] = await database.client`select count(*)::int n from money.money_operations where business_id = ${actor.businessId}`;

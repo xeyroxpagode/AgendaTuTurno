@@ -20,7 +20,7 @@ import {
   type OperationPrincipal, type Tx
 } from "../system/operations.js";
 import { database } from "../../lib/runtime.js";
-import { assertActorStillAuthorized, lockBusiness, requireCapability } from "../h05/domain.js";
+import { assertActorStillAuthorized, requireCapability } from "../h05/domain.js";
 import { confirmStockCommitments, releaseStockCommitments, type OrderAuthority } from "../inventory/commitments.js";
 import { issueOpaqueToken } from "../../lib/security/opaque-token.js";
 import { issueOrderCredentialTx, reissueOrderCredentialTx } from "../client-auth/order-credential.js";

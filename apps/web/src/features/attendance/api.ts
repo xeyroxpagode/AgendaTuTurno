@@ -9,7 +9,7 @@ import { api } from "@/lib/api/client";
 
 export type AttendanceStatus = "IN_PROGRESS" | "COMPLETED" | "PARTIAL" | "INTERRUPTED";
 
-export type PerformedService = { name: string; durationMinutes: number; priceMinor?: number; currency?: "ARS" };
+export type PerformedService = { serviceId?: string; name: string; durationMinutes: number; priceMinor?: number; currency?: "ARS" };
 
 export type AttendanceSummary = {
   id: string;

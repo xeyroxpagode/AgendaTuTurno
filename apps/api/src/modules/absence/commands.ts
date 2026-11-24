@@ -172,6 +172,18 @@ export async function detectAffectedCommitments(tx: Tx, input: {
   }>;
 }
 
+function isBlockingCommitment(commitment: { sourceType: string; reservationStatus: string | null }) {
+  return commitment.sourceType === "COURSE_SESSION"
+    || (commitment.sourceType === "RESERVATION" && commitment.reservationStatus === "CONFIRMED");
+}
+
+function affectedResources(blocking: Awaited<ReturnType<typeof detectAffectedCommitments>>) {
+  return {
+    conflictingReservations: blocking.flatMap((item) => item.reservationId ? [item.reservationId] : []),
+    conflictingCourseSessions: blocking.filter((item) => item.sourceType === "COURSE_SESSION").map((item) => item.sourceId)
+  };
+}
+
 /** Registra (o refresca) los conflictos `OPEN` de una ausencia. */
 async function upsertAbsenceConflicts(tx: Tx, input: {
   businessId: string;
@@ -214,7 +226,7 @@ async function recordAbsenceConflicts(input: { businessId: string; absenceId: st
       businessId: input.businessId, staffMemberId: absence.staffMemberId, localDate: absence.localDate,
       startMinute: absence.startMinute, endMinute: absence.endMinute, timezone
     });
-    const blocking = affected.filter((item) => item.sourceType === "RESERVATION" && item.reservationStatus === "CONFIRMED");
+    const blocking = affected.filter(isBlockingCommitment);
     if (!blocking.length) return;
     await upsertAbsenceConflicts(tx as unknown as Tx, {
       businessId: input.businessId,
@@ -229,7 +241,7 @@ async function recordAbsenceConflicts(input: { businessId: string; absenceId: st
       actor: input.actor,
       beforeRevision: Number(absence.revision),
       afterRevision: Number(absence.revision),
-      changes: { conflictingReservations: blocking.map((item) => item.reservationId) },
+      changes: affectedResources(blocking),
       staffMemberId: absence.staffMemberId as string
     });
   });
@@ -501,14 +513,12 @@ export async function applyAbsence(input: { actor: Actor; absenceId: string; exp
         businessId, staffMemberId: absence.staffMemberId, localDate: absence.localDate,
         startMinute: absence.startMinute, endMinute: absence.endMinute, timezone
       });
-      const blocking = affected.filter((item) => item.sourceType === "RESERVATION" && item.reservationStatus === "CONFIRMED");
+      const blocking = affected.filter(isBlockingCommitment);
 
       if (blocking.length) {
         // El artefacto de conflicto se persiste FUERA de esta transacción
         // (ver `recordAbsenceConflicts`): aquí la transacción falla y se deshace.
-        throw new DomainError("AVAILABILITY_IMPACT_CONFLICT", "The absence still affects confirmed commitments", 409, {
-          conflictingReservations: blocking.map((item) => item.reservationId)
-        });
+        throw new DomainError("AVAILABILITY_IMPACT_CONFLICT", "The absence still affects confirmed commitments", 409, affectedResources(blocking));
       }
 
       // Materializa la indisponibilidad efectiva (groundwork de Availability).
@@ -592,14 +602,14 @@ export async function syncAbsenceConflicts(input: { actor: Actor; absenceId: str
       businessId, staffMemberId: absence.staffMemberId, localDate: absence.localDate,
       startMinute: absence.startMinute, endMinute: absence.endMinute, timezone
     });
-    const blocking = affected.filter((item) => item.sourceType === "RESERVATION" && item.reservationStatus === "CONFIRMED");
+    const blocking = affected.filter(isBlockingCommitment);
 
     await upsertAbsenceConflicts(tx, { businessId, sourceOperationId: absence.createdOperationId, allocationIds: blocking.map((item) => item.allocationId) });
 
     // Los conflictos cuyo commitment ya no está activo se resuelven referencing
     // el último evento de Booking que produjo la resolución.
     const open = await tx`
-      select c.id, c.allocation_id "allocationId", a.status::text "allocationStatus",
+      select c.id, c.allocation_id "allocationId", a.status::text "allocationStatus", a.source_type::text "sourceType", a.source_id "sourceId",
              r.id "reservationId", r.status::text "reservationStatus"
         from availability.commitment_conflicts c
         join availability.resource_allocations a on a.business_id=c.business_id and a.id=c.allocation_id
@@ -609,9 +619,12 @@ export async function syncAbsenceConflicts(input: { actor: Actor; absenceId: str
        for update of c`;
 
     for (const conflict of open) {
-      const stillBlocking = conflict.allocationStatus === "ACTIVE" && conflict.reservationStatus === "CONFIRMED";
+      const stillBlocking = conflict.allocationStatus === "ACTIVE" && isBlockingCommitment({ sourceType: conflict.sourceType, reservationStatus: conflict.reservationStatus });
       if (stillBlocking) continue;
-      const [event] = await tx`
+      const [event] = conflict.sourceType === "COURSE_SESSION" ? await tx`
+        select id, event_type "eventType" from courses.course_session_events
+         where business_id=${businessId} and session_id=${conflict.sourceId}
+         order by created_at desc limit 1` : await tx`
         select id, event_type::text "eventType" from booking.reservation_events
          where business_id=${businessId} and reservation_id=${conflict.reservationId}
          order by sequence desc limit 1`;
@@ -629,7 +642,8 @@ export async function syncAbsenceConflicts(input: { actor: Actor; absenceId: str
     }
 
     const current = await tx`
-      select c.allocation_id "allocationId", a.source_id "reservationId", c.status::text status, c.resolution_reference "resolutionReference"
+      select c.allocation_id "allocationId", case when a.source_type='RESERVATION' then a.source_id end "reservationId",
+             case when a.source_type='COURSE_SESSION' then a.source_id end "courseSessionId", c.status::text status, c.resolution_reference "resolutionReference"
         from availability.commitment_conflicts c
         join availability.resource_allocations a on a.business_id=c.business_id and a.id=c.allocation_id
        where c.business_id=${businessId} and c.reason_code=${ABSENCE_CONFLICT_REASON}

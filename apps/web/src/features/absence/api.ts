@@ -44,6 +44,8 @@ export type AbsenceDetail = { absence: AbsenceSummary; events: AbsenceEvent[] };
 
 export type AbsenceConflict = {
   reservationId: string | null;
+  courseId: string | null;
+  courseTitle: string | null;
   allocationId: string;
   staffMemberId: string;
   localDate: string;

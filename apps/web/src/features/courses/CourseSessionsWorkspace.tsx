@@ -22,6 +22,7 @@ export function CourseSessionsWorkspace({ courseId }: { courseId: string }) {
   const [sessions, setSessions] = useState<CourseSession[]>([]);
   const [instructors, setInstructors] = useState<Array<{ staffMemberId: string; effectiveDisplayName: string }>>([]);
   const [history, setHistory] = useState<CourseEvent[]>([]);
+  const [instructorsLoaded, setInstructorsLoaded] = useState(false);
   const [instructor, setInstructor] = useState("");
   const [localDate, setLocalDate] = useState("");
   const [localStart, setLocalStart] = useState("09:00");
@@ -37,12 +38,12 @@ export function CourseSessionsWorkspace({ courseId }: { courseId: string }) {
     const [items, professionals, events] = await Promise.all([
       coursesApi.sessions(courseId), coursesApi.instructors(), coursesApi.history({ courseId })
     ]);
-    setSessions(items); setInstructors(professionals); setHistory(events);
-    setInstructor((current) => current || professionals[0]?.staffMemberId || "");
+    setSessions(items); setInstructors(professionals); setHistory(events); setInstructorsLoaded(true);
+    setInstructor((current) => professionals.some((item) => item.staffMemberId === current) ? current : professionals[0]?.staffMemberId ?? "");
     setError(null);
   }, [courseId]);
 
-  useEffect(() => { void load().catch((cause) => setError(cause instanceof ApiError ? cause.message : "No se pudieron cargar las sesiones")); }, [load]);
+  useEffect(() => { void load().catch((cause) => setError(cause instanceof Error ? cause.message : "No se pudieron cargar las sesiones")); }, [load]);
 
   async function run(key: string, action: () => Promise<unknown>, message: string) {
     setBusy(key); setError(null); setNotice(null);
@@ -65,7 +66,7 @@ export function CourseSessionsWorkspace({ courseId }: { courseId: string }) {
           await coursesApi.schedule(courseId, { instructorStaffMemberId: instructor, localDate, localStart, durationMinutes: Number(duration) });
           setLocalDate("");
         }, "Sesión programada"); }}>
-          <Field label="Instructor" error={instructors.length === 0 ? "No hay instructores elegibles" : undefined}>
+          <Field label="Instructor" error={instructorsLoaded && instructors.length === 0 ? "No hay instructores elegibles" : undefined}>
             <select value={instructor} onChange={(event) => setInstructor(event.target.value)} required disabled={instructors.length === 0}>
               {instructors.map((item) => <option key={item.staffMemberId} value={item.staffMemberId}>{item.effectiveDisplayName}</option>)}
             </select>
@@ -89,11 +90,15 @@ export function CourseSessionsWorkspace({ courseId }: { courseId: string }) {
                 <div><strong>{session.localDate} · {minuteToClock(session.localStartMinute)}</strong><StatusPill tone={sessionTone(session.status)}>{statusLabel[session.status] ?? session.status}</StatusPill></div>
                 <p>{Number(session.durationMinutes)} minutos · zona {session.timezone}</p>
                 <div className="row-actions">
-                  {session.status === "SCHEDULED" && <Button disabled={busy !== null} onClick={() => void run(`confirm:${session.id}`, () => coursesApi.confirm(session.id), "Sesión confirmada")}>Confirmar</Button>}
+                  {session.status === "SCHEDULED" && <>
+                    <Button disabled={busy !== null} onClick={() => void run(`confirm:${session.id}`, () => coursesApi.confirm(session.id), "Sesión confirmada")}>Confirmar</Button>
+                    <Button className="danger" disabled={busy !== null} onClick={() => void run(`cancel:${session.id}`, () => coursesApi.cancelSession(session.id), "Sesión cancelada")}>Cancelar</Button>
+                  </>}
                   {(session.status === "CONFIRMED" || session.status === "RESCHEDULED") && <>
                     <Button className="secondary" disabled={busy !== null} onClick={() => { setEditing(session.id); setNewDate(session.localDate); setNewStart(minuteToClock(session.localStartMinute)); }}>Reprogramar</Button>
                     <Button className="danger" disabled={busy !== null} onClick={() => void run(`cancel:${session.id}`, () => coursesApi.cancelSession(session.id), "Sesión cancelada")}>Cancelar</Button>
-                    <Button className="secondary" disabled={busy !== null} onClick={() => void run(`complete:${session.id}`, () => coursesApi.complete(session.id), "Sesión registrada como realizada")}>Registrar realización</Button>
+                    {new Date(session.occupiedEndAt).getTime() <= Date.now() &&
+                      <Button className="secondary" disabled={busy !== null} onClick={() => void run(`complete:${session.id}`, () => coursesApi.complete(session.id), "Sesión registrada como realizada")}>Registrar realización</Button>}
                   </>}
                 </div>
                 {editing === session.id && <div className="form-grid">

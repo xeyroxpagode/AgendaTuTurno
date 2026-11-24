@@ -11,7 +11,9 @@ async function counterparty(tx: Parameters<typeof calculateEstimate>[0], busines
     select p.first_name || coalesce(' ' || p.last_name, '') name
     from team.staff_members sm join iam.persons p on p.id=sm.person_id
     where sm.business_id=${businessId} and sm.id=${staffMemberId}` as unknown as { name: string }[];
-  return row?.name ?? "Professional";
+  // E-18: nunca inventar una contraparte genérica en una obligación financiera.
+  if (!row) throw new DomainError("NOT_FOUND", "No se pudo identificar la contraparte del profesional; la liquidación no puede cerrarse", 404);
+  return row.name;
 }
 
 /** CAP-08-04 · Cierre con snapshot inmutable y doble protección anti-duplicado. */
@@ -22,10 +24,14 @@ export async function closeSettlement(actor: Actor, raw: unknown, operationId: s
     const estimate = await calculateEstimate(tx, actor, { staffMemberId: input.staffMemberId, from: new Date(input.from), to: new Date(input.to) });
     if (estimate.state === "NOT_CONFIGURED") throw new DomainError("NOT_CONFIGURED", "The agreement is incomplete; no settlement can be calculated", 409);
 
+    if (estimate.sourceFingerprint !== input.expectedFingerprint) {
+      throw new DomainError("ESTIMATE_CHANGED", "La estimación cambió. Calculala de nuevo antes de cerrar el período.", 409);
+    }
+
     const name = await counterparty(tx, actor.businessId, input.staffMemberId);
     const snapshot = JSON.stringify({
       period: { from: estimate.periodStart, to: estimate.periodEnd },
-      terms: { agreementVersionId: estimate.agreementVersionId, termsHash: estimate.termsHash },
+      terms: { agreementVersionId: estimate.agreementVersionId, termsHash: estimate.termsHash, versions: estimate.agreementVersions },
       sources: estimate.lines, sourceFingerprint: estimate.sourceFingerprint
     });
 
@@ -42,7 +48,7 @@ export async function closeSettlement(actor: Actor, raw: unknown, operationId: s
         returning id`;
       settlementId = row!.id as string;
     } catch (error) {
-      if ((error as { code?: string }).code === "23505") {
+      if (["23505", "23P01"].includes((error as { code?: string }).code ?? "")) {
         throw new DomainError("SETTLEMENT_CONFLICT", "This period or source was already settled", 409);
       }
       throw error;
@@ -66,15 +72,15 @@ export async function closeSettlement(actor: Actor, raw: unknown, operationId: s
     const dueDate = new Date(input.to).toISOString().slice(0, 10);
     if (BigInt(estimate.payableMinor) > 0n) {
       const [row] = await tx`
-        insert into obligations.expense_obligations(business_id, kind, title, counterparty_name, amount_minor, amount_state, currency, due_date, status, revision, note, actor_account_id, operation_id)
-        values (${actor.businessId}, 'PAYABLE', ${`Liquidación ${input.from.slice(0, 10)}`}, ${name}, ${estimate.payableMinor}, 'KNOWN', 'ARS', ${dueDate}, 'OPEN', 1, ${`Settlement ${settlementId}`}, ${actor.accountId}, ${operationId})
+        insert into obligations.expense_obligations(business_id, kind, title, counterparty_name, amount_minor, amount_state, currency, due_date, status, revision, note, actor_account_id, operation_id, settlement_id)
+        values (${actor.businessId}, 'PAYABLE', ${`Liquidación ${input.from.slice(0, 10)}`}, ${name}, ${estimate.payableMinor}, 'KNOWN', 'ARS', ${dueDate}, 'OPEN', 1, ${`Settlement ${settlementId}`}, ${actor.accountId}, ${operationId}, ${settlementId})
         returning id`;
       payableObligationId = row!.id as string;
     }
     if (BigInt(estimate.receivableMinor) > 0n) {
       const [row] = await tx`
-        insert into obligations.expense_obligations(business_id, kind, title, counterparty_name, amount_minor, amount_state, currency, due_date, status, revision, note, actor_account_id, operation_id)
-        values (${actor.businessId}, 'RECEIVABLE', ${`Alquiler de silla ${input.from.slice(0, 10)}`}, ${name}, ${estimate.receivableMinor}, 'KNOWN', 'ARS', ${dueDate}, 'OPEN', 1, ${`Settlement ${settlementId}`}, ${actor.accountId}, ${operationId})
+        insert into obligations.expense_obligations(business_id, kind, title, counterparty_name, amount_minor, amount_state, currency, due_date, status, revision, note, actor_account_id, operation_id, settlement_id)
+        values (${actor.businessId}, 'RECEIVABLE', ${`Alquiler de silla ${input.from.slice(0, 10)}`}, ${name}, ${estimate.receivableMinor}, 'KNOWN', 'ARS', ${dueDate}, 'OPEN', 1, ${`Settlement ${settlementId}`}, ${actor.accountId}, ${operationId}, ${settlementId})
         returning id`;
       receivableObligationId = row!.id as string;
     }

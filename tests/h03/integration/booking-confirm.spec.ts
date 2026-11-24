@@ -6,7 +6,7 @@ import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../../apps/api/src/app";
 import { database } from "../../../apps/api/src/lib/runtime";
-import { seedBookingBusiness, type BookingSeed } from "./booking-fixtures";
+import { nextBookingWednesday, seedBookingBusiness, type BookingSeed } from "./booking-fixtures";
 import { createIntent } from "../../../apps/api/src/modules/booking/security/guest-access";
 
 let app: FastifyInstance;
@@ -25,7 +25,7 @@ describe("H03.U04 guest booking E2E", () => {
       method: "POST",
       url: `/v1/public/businesses/${seed.business}/booking-quotes`,
       headers: { "content-type": "application/json" },
-      payload: { serviceIds: [seed.serviceCut], professionalPreference: { type: "SPECIFIC", staffMemberId: seed.staffA }, localDate: "2026-11-18", visibleStart: "13:30" },
+      payload: { serviceIds: [seed.serviceCut], professionalPreference: { type: "SPECIFIC", staffMemberId: seed.staffA }, localDate: nextBookingWednesday(), visibleStart: "13:30" },
     });
     expect(quoteRes.statusCode).toBe(200);
     const quoteBody = quoteRes.json() as { quote: string; expiresAt: string };

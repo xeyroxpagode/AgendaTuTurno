@@ -22,10 +22,16 @@ export function EconomyWorkspace({ staffMemberId, staffName }: { staffMemberId: 
   const [history, setHistory] = useState<{ settlements: Settlement[]; adjustments: Array<{ id: string; amountMinor: string; reason: string; createdAt: string }> }>({ settlements: [], adjustments: [] });
   const [month, setMonth] = useState(todayMonth());
   const [modality, setModality] = useState("COMMISSION");
-  const [base, setBase] = useState("REALIZED");
-  const [bps, setBps] = useState("10");
+  const [base, setBase] = useState("");
+  const [bps, setBps] = useState("");
   const [fixed, setFixed] = useState("");
   const [rent, setRent] = useState("");
+  const [periodUnit, setPeriodUnit] = useState("");
+  const [periodInterval, setPeriodInterval] = useState("");
+  const [periodAnchor, setPeriodAnchor] = useState("");
+  const [customPeriod, setCustomPeriod] = useState(false);
+  const [periodFrom, setPeriodFrom] = useState("");
+  const [periodTo, setPeriodTo] = useState("");
   const [validFrom, setValidFrom] = useState(todayMonth() + "-01");
   const [validTo, setValidTo] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -54,6 +60,11 @@ export function EconomyWorkspace({ staffMemberId, staffName }: { staffMemberId: 
   const needsBase = modality === "COMMISSION" || modality === "MIXED";
   const needsFixed = modality === "FIXED" || modality === "MIXED";
   const needsRent = modality === "CHAIR_RENT" || modality === "MIXED";
+  const includesPeriodicAmount = (needsFixed && fixed !== "") || (needsRent && rent !== "");
+  const periodAvailable = customPeriod ? Boolean(periodFrom && periodTo && periodTo > periodFrom) : Boolean(month);
+  const bounds = () => customPeriod
+    ? { from: `${periodFrom}T00:00:00.000Z`, to: `${periodTo}T00:00:00.000Z` }
+    : monthBounds(month);
 
   return (
     <section className="content">
@@ -69,11 +80,17 @@ export function EconomyWorkspace({ staffMemberId, staffName }: { staffMemberId: 
       <div className="panel-section">
         <h2>Acuerdo y versiones</h2>
         <form className="form-grid" onSubmit={(event) => { event.preventDefault(); void run("agreement", async () => {
-          const input: Record<string, unknown> = { staffMemberId, modality, validFrom: `${validFrom}T00:00:00.000Z`, validTo: `${validTo}T23:59:59.000Z` };
+          const end = new Date(`${validTo}T00:00:00.000Z`);
+          end.setUTCDate(end.getUTCDate() + 1);
+          const input: Record<string, unknown> = { staffMemberId, modality, validFrom: `${validFrom}T00:00:00.000Z`, validTo: end.toISOString() };
           // El usuario carga PORCENTAJE; el motor guarda PUNTOS BASE (1% = 100 bps).
-          if (needsBase) { input.commissionBase = base; input.bps = Math.round(Number(bps) * 100); }
+          if (needsBase && (base || bps !== "")) {
+            if (base) input.commissionBase = base;
+            if (bps !== "") input.bps = Math.round(Number(bps) * 100);
+          }
           if (needsFixed && fixed) input.fixedAmountMinor = pesosToMinor(fixed);
           if (needsRent && rent) input.rentAmountMinor = pesosToMinor(rent);
+          if (includesPeriodicAmount) input.periodCadence = { unit: periodUnit, interval: Number(periodInterval), anchorDate: periodAnchor };
           await economyApi.createVersion(input);
           setFixed(""); setRent(""); setValidTo("");
         }, "Versión del acuerdo guardada"); }}>
@@ -86,11 +103,20 @@ export function EconomyWorkspace({ staffMemberId, staffName }: { staffMemberId: 
             </select>
           </Field>
           {needsBase && <>
-            <Field label="Base de cálculo"><select value={base} onChange={(event) => setBase(event.target.value)}><option value="REALIZED">Servicios realizados</option><option value="COLLECTED">Cobros confirmados</option></select></Field>
-            <Field label="Comisión (%)"><input type="number" min={0} max={100} value={bps} onChange={(event) => setBps(event.target.value)} /></Field>
+            <Field label="Base de cálculo"><select value={base} onChange={(event) => setBase(event.target.value)}><option value="">Seleccioná una base</option><option value="REALIZED">Servicios realizados</option><option value="COLLECTED">Cobros confirmados</option></select></Field>
+            <Field label="Comisión (%)"><input type="number" min={0} max={100} step="0.01" value={bps} onChange={(event) => setBps(event.target.value)} /></Field>
           </>}
           {needsFixed && <Field label="Importe fijo por período ($)"><input type="number" min={0} step="0.01" value={fixed} onChange={(event) => setFixed(event.target.value)} /></Field>}
           {needsRent && <Field label="Alquiler de silla por período ($)"><input type="number" min={0} step="0.01" value={rent} onChange={(event) => setRent(event.target.value)} /></Field>}
+          {includesPeriodicAmount && <>
+            <Field label="Unidad del período">
+              <select value={periodUnit} onChange={(event) => setPeriodUnit(event.target.value)} required>
+                <option value="">Elegí una unidad</option><option value="DAYS">Días</option><option value="MONTHS">Meses calendario</option>
+              </select>
+            </Field>
+            <Field label="Cantidad por período"><input type="number" min={1} max={365} value={periodInterval} onChange={(event) => setPeriodInterval(event.target.value)} required /></Field>
+            <Field label="Fecha de inicio del ciclo"><input type="date" value={periodAnchor} onChange={(event) => setPeriodAnchor(event.target.value)} required /></Field>
+          </>}
           <Field label="Vigente desde"><input type="date" value={validFrom} onChange={(event) => setValidFrom(event.target.value)} required /></Field>
           <Field label="Vigente hasta"><input type="date" value={validTo} onChange={(event) => setValidTo(event.target.value)} required /></Field>
           <Button type="submit" disabled={busy !== null || !validTo}>Guardar versión</Button>
@@ -110,15 +136,19 @@ export function EconomyWorkspace({ staffMemberId, staffName }: { staffMemberId: 
       <div className="panel-section">
         <h2>Estimación y cierre</h2>
         <div className="form-grid">
-          <Field label="Período"><input type="month" value={month} onChange={(event) => { setMonth(event.target.value); setEstimate(null); }} /></Field>
-          <Button disabled={busy !== null} onClick={() => void run("estimate", async () => {
-            const bounds = monthBounds(month);
-            setEstimate(await economyApi.estimate(staffMemberId, bounds.from, bounds.to));
+          <label className="check-row"><input type="checkbox" checked={customPeriod} onChange={(event) => { setCustomPeriod(event.target.checked); setEstimate(null); }} /> Elegir fechas del período</label>
+          {customPeriod ? <>
+            <Field label="Inicio del período"><input type="date" value={periodFrom} onChange={(event) => { setPeriodFrom(event.target.value); setEstimate(null); }} /></Field>
+            <Field label="Fin del período (excluido)"><input type="date" value={periodTo} onChange={(event) => { setPeriodTo(event.target.value); setEstimate(null); }} /></Field>
+          </> : <Field label="Período"><input type="month" value={month} onChange={(event) => { setMonth(event.target.value); setEstimate(null); }} /></Field>}
+          <Button disabled={busy !== null || !periodAvailable} onClick={() => void run("estimate", async () => {
+            const period = bounds();
+            setEstimate(await economyApi.estimate(staffMemberId, period.from, period.to));
           }, "Estimación actualizada")}>Calcular estimación</Button>
         </div>
         {estimate && <div className="estimate-panel">
           <StatusPill tone={estimate.state === "OPEN_ESTIMATE" ? "positive" : "warning"}>{estimate.state === "OPEN_ESTIMATE" ? "Estimación abierta" : "No configurado"}</StatusPill>
-          {estimate.state === "NOT_CONFIGURED" ? <p>Faltan términos del acuerdo. No se muestra un importe de cero como resultado válido.</p> : <>
+          {estimate.state === "NOT_CONFIGURED" ? <p>Revisá la vigencia, la periodicidad y los importes del acuerdo para el período elegido.</p> : <>
             <p><strong>A pagar:</strong> {formatARS(estimate.payableMinor)}</p>
             <p><strong>A cobrar (alquiler):</strong> {formatARS(estimate.receivableMinor)}</p>
             <ul className="audit-list">{estimate.lines.map((line, index) => (
@@ -126,8 +156,8 @@ export function EconomyWorkspace({ staffMemberId, staffName }: { staffMemberId: 
             ))}</ul>
             <Field label="Confirmación para cerrar"><input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="CLOSE_SETTLEMENT" /></Field>
             <Button disabled={busy !== null || confirmation !== "CLOSE_SETTLEMENT"} onClick={() => void run("close", async () => {
-              const bounds = monthBounds(month);
-              await economyApi.close({ staffMemberId, from: bounds.from, to: bounds.to, confirmation });
+              const period = bounds();
+              await economyApi.close({ staffMemberId, from: period.from, to: period.to, confirmation, expectedFingerprint: estimate.sourceFingerprint });
               setConfirmation(""); setEstimate(null);
             }, "Período cerrado")}>Cerrar período</Button>
           </>}
@@ -144,6 +174,15 @@ export function EconomyWorkspace({ staffMemberId, staffName }: { staffMemberId: 
               <StatusPill tone="positive">{item.status === "ADJUSTED" ? "Ajustada" : "Cerrada"}</StatusPill>
             </div>
             <p>Pagable {formatARS(item.payableMinor)} · Cobrable {formatARS(item.receivableMinor)}</p>
+            {item.snapshot && <details>
+              <summary>Ver cálculo al cierre</summary>
+              <p>Versiones del acuerdo: {item.snapshot.terms?.versions?.length ?? (item.snapshot.terms?.agreementVersionId ? 1 : 0)}</p>
+              <ul className="audit-list">{(item.snapshot.sources ?? []).map((line) => (
+                <li key={`${line.sourceType}-${line.sourceId}`}>{line.component} · {formatARS(line.amountMinor)}
+                  {line.basis && ` · base ${formatARS(line.basis.baseMinor)}`}
+                </li>
+              ))}</ul>
+            </details>}
           </li>))}</ul>
         )}
         {history.settlements.length > 0 && <div className="estimate-panel">

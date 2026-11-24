@@ -1,6 +1,7 @@
 import { DomainError, parseClockToMinute, type Capability } from "@youngkingz/contracts";
 import type { Actor } from "../iam/authorization.js";
 import { audit, executeOperation, revalidateAuthority, type Tx } from "../system/operations.js";
+import { lockAvailabilityGuard } from "../availability/guard.js";
 import { releaseAllocation } from "../availability/allocation.js";
 import { assertSessionTransition, businessTimezone, composeLocalInterval } from "./domain.js";
 import { claimCourseSession } from "./claim.js";
@@ -21,8 +22,10 @@ async function releaseSessionAllocation(tx: Tx, actor: Actor, sessionId: string)
 
 export async function confirmSession(actor: Actor, input: { sessionId: string }, operationId: string) {
   return executeOperation({ operationId, command: "session.confirm", actor, payload: input }, async (tx) => {
+    await lockAvailabilityGuard(tx, actor.businessId);
     const session = await requireSession(actor.businessId, input.sessionId, tx);
-    await requireCourse(actor.businessId, String(session.courseId), tx);
+    const course = await requireCourse(actor.businessId, String(session.courseId), tx);
+    if (course.status === "CANCELLED") throw new DomainError("SESSION_STATE_INVALID", "El curso está cancelado", 409);
     assertSessionTransition(String(session.status), "CONFIRMED");
     await claimCourseSession(tx, actor, {
       businessId: actor.businessId, sessionId: input.sessionId,
@@ -48,6 +51,7 @@ export async function rescheduleSession(
   operationId: string
 ) {
   const result = await executeOperation({ operationId, command: "session.reschedule", actor, payload: input }, async (tx) => {
+    await lockAvailabilityGuard(tx, actor.businessId);
     const session = await requireSession(actor.businessId, input.sessionId, tx);
     if (Number(session.revision) !== input.revision) throw new DomainError("STALE_REVISION", "Session revision is stale", 409);
     assertSessionTransition(String(session.status), "RESCHEDULED");
@@ -86,9 +90,10 @@ export async function rescheduleSession(
 
 export async function cancelSession(actor: Actor, input: { sessionId: string }, operationId: string) {
   return executeOperation({ operationId, command: "session.cancel", actor, payload: input }, async (tx) => {
+    await lockAvailabilityGuard(tx, actor.businessId);
     const session = await requireSession(actor.businessId, input.sessionId, tx);
     assertSessionTransition(String(session.status), "CANCELLED");
-    const released = await releaseSessionAllocation(tx, actor, input.sessionId);
+    const released = session.status === "SCHEDULED" ? null : await releaseSessionAllocation(tx, actor, input.sessionId);
     const [updated] = await tx`
       update courses.course_sessions set status='CANCELLED', cancelled_at=now(), revision=revision+1, updated_at=now()
       where business_id=${actor.businessId} and id=${input.sessionId} returning revision`;
@@ -101,8 +106,12 @@ export async function cancelSession(actor: Actor, input: { sessionId: string }, 
 
 export async function completeSession(actor: Actor, input: { sessionId: string }, operationId: string) {
   return executeOperation({ operationId, command: "session.complete", actor, payload: input }, async (tx) => {
+    await lockAvailabilityGuard(tx, actor.businessId);
     const session = await requireSession(actor.businessId, input.sessionId, tx);
     assertSessionTransition(String(session.status), "COMPLETED");
+    if (new Date(session.occupiedEndAt).getTime() > Date.now()) {
+      throw new DomainError("SESSION_STATE_INVALID", "Registrá la realización cuando termine la sesión", 409);
+    }
     const released = await releaseSessionAllocation(tx, actor, input.sessionId);
     const [updated] = await tx`
       update courses.course_sessions set status='COMPLETED', completed_by_account_id=${actor.accountId},

@@ -8,6 +8,7 @@ import { audit, executeOperation, revalidateAuthority } from "../system/operatio
 import { assertInstructorEligible, businessTimezone, composeLocalInterval } from "./domain.js";
 import { requireCourse } from "./repository.js";
 import { recordCourseEvent, recordSessionEvent } from "./events.js";
+import { lockAvailabilityGuard } from "../availability/guard.js";
 import { releaseAllocation } from "../availability/allocation.js";
 
 const MANAGE = "courses.manage" as const;
@@ -21,7 +22,7 @@ export async function createCourse(actor: Actor, raw: unknown, operationId: stri
     const [course] = await tx`
       insert into courses.courses(business_id, title, summary, description, contact_channel, contact_value, created_by_account_id, operation_id)
       values (${actor.businessId}, ${input.title}, ${input.summary ?? null}, ${input.description ?? null},
-              ${input.contactChannel}, ${input.contactValue ?? null}, ${actor.accountId}, ${operationId})
+              ${input.contactChannel}, ${input.contactChannel === "NONE" ? null : input.contactValue ?? null}, ${actor.accountId}, ${operationId})
       returning id, revision`;
     await recordCourseEvent(tx, actor, { courseId: course!.id as string, eventType: "CREATED", operationId, changes: { title: input.title } });
     await revalidateAuthority(tx, actor, MANAGE);
@@ -42,9 +43,11 @@ export async function updateCourse(actor: Actor, courseId: string, raw: unknown,
         title=coalesce(${input.title ?? null},title), summary=case when ${input.summary === undefined} then summary else ${input.summary ?? null} end,
         description=case when ${input.description === undefined} then description else ${input.description ?? null} end,
         contact_channel=coalesce(${input.contactChannel ?? null},contact_channel),
-        contact_value=case when ${input.contactValue === undefined} then contact_value else ${input.contactValue ?? null} end,
+        contact_value=case when coalesce(${input.contactChannel ?? null},contact_channel)='NONE' then null
+          when ${input.contactValue === undefined} then contact_value else ${input.contactValue ?? null} end,
         revision=revision+1, updated_at=now()
-      where business_id=${actor.businessId} and id=${courseId} returning revision`;
+      where business_id=${actor.businessId} and id=${courseId} and revision=${input.revision} returning revision`;
+    if (!updated) throw new DomainError("STALE_REVISION", "Course revision is stale", 409);
     await recordCourseEvent(tx, actor, { courseId, eventType: "UPDATED", operationId, changes: { fields: Object.keys(input).filter((key) => key !== "revision") } });
     await revalidateAuthority(tx, actor, MANAGE);
     await audit(tx, { actor, operationId, action: "course.updated", capability: MANAGE, resourceType: "COURSE", resourceId: courseId });
@@ -80,7 +83,8 @@ export async function scheduleSession(actor: Actor, raw: unknown, operationId: s
   const parsed = scheduleCourseSessionSchema.parse(raw);
   authorizationService.require(actor, SCHEDULE, { staffMemberId: parsed.instructorStaffMemberId });
   return executeOperation({ operationId, command: "session.schedule", actor, payload: parsed }, async (tx) => {
-    await requireCourse(actor.businessId, parsed.courseId, tx);
+    const course = await requireCourse(actor.businessId, parsed.courseId, tx);
+    if (course.status === "CANCELLED") throw new DomainError("SESSION_STATE_INVALID", "No se pueden programar sesiones de un curso cancelado", 409);
     await assertInstructorEligible(tx, actor.businessId, parsed.instructorStaffMemberId);
     const timezone = await businessTimezone(actor.businessId, tx);
     const startMinute = parseClockToMinute(parsed.localStart);
@@ -103,6 +107,7 @@ export async function scheduleSession(actor: Actor, raw: unknown, operationId: s
 export async function cancelCourse(actor: Actor, courseId: string, operationId: string) {
   authorizationService.require(actor, MANAGE);
   return executeOperation({ operationId, command: "course.cancel", actor, payload: { courseId } }, async (tx) => {
+    await lockAvailabilityGuard(tx, actor.businessId);
     const course = await requireCourse(actor.businessId, courseId, tx);
     if (String(course.status) === "CANCELLED") throw new DomainError("SESSION_STATE_INVALID", "Course is already cancelled", 409);
     const sessions = await tx`

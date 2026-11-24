@@ -255,6 +255,16 @@ export async function registerBookingRoutes(app: FastifyInstance) {
     return result;
   });
 
+  app.get("/v1/public/booking-businesses", async () => ({
+    businesses: await rows<{ id: string; name: string }>(sql`
+      select b.id, b.display_name name
+      from business.businesses b
+      join business.booking_policy_states ps on ps.business_id=b.id
+      join business.booking_policy_versions v on v.business_id=b.id and v.id=ps.current_version_id
+      where b.status='ACTIVE' and v.public_booking_enabled
+      order by b.display_name,b.id`)
+  }));
+
   /* ─── PUBLIC: catálogo de servicios publicados por nombre (sin UUID manual) ─── */
   app.get("/v1/public/businesses/:businessId/catalog/services", async request => {
     const { businessId } = businessParam.parse(request.params);

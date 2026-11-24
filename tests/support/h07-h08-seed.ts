@@ -8,7 +8,7 @@ import { createClient } from "@supabase/supabase-js";
 
 process.loadEnvFile?.(".env");
 
-const ADMIN_URL = "postgresql://postgres:postgres@127.0.0.1:55322/postgres";
+const QA_PORT = Number(process.env.QA_POSTGRES_PORT ?? 55322);
 export const QA_DATABASE = process.env.H07_H08_QA_DATABASE ?? "youngkingz_h07_qa_20261124";
 export const QA_PASSWORD = "QaTestPass2026!x";
 
@@ -35,8 +35,7 @@ export async function assertQaDatabase(sql: postgres.Sql) {
 }
 
 export async function seedH07H08Qa() {
-  const admin = postgres(ADMIN_URL, { max: 1 });
-  const sql = postgres(`postgresql://postgres:postgres@127.0.0.1:55322/${QA_DATABASE}`, { max: 1 });
+  const sql = postgres(`postgresql://postgres:postgres@127.0.0.1:${QA_PORT}/${QA_DATABASE}`, { max: 1 });
   try {
     await assertQaDatabase(sql);
     const supabaseUrl = process.env.SUPABASE_URL ?? "http://127.0.0.1:55321";
@@ -84,7 +83,6 @@ export async function seedH07H08Qa() {
     return { ids, emails, authIds, businessIds: { b1: ids.b1, b2: ids.b2 }, staffIds: { owner: ids.staffOwner, reception: ids.staffReception, barber: ids.staffBarber } };
   } finally {
     await sql.end();
-    await admin.end();
   }
 }
 

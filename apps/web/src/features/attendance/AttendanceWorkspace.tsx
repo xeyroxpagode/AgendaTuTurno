@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Button, EmptyState, StatusPill } from "@youngkingz/ui";
 import { ApiError, api } from "@/lib/api/client";
+import { getAgendaReservation, type AgendaDetail } from "@/features/agenda/api";
+import { financeApi, releaseOperationId, stableOperationId } from "@/features/finance/api";
 import {
   correctAttendance, getAttendance, listAttendanceProfessionals, listAttendances,
   registerWalkIn, setAttendanceState,
@@ -53,6 +55,8 @@ export function AttendanceWorkspace() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [linkedReservation, setLinkedReservation] = useState<AgendaDetail | null>(null);
+  const [performedPositions, setPerformedPositions] = useState<number[]>([]);
   type AttendanceTerminalStatus = "COMPLETED" | "PARTIAL" | "INTERRUPTED";
   const [form, setForm] = useState({ reservationId: "", staffMemberId: "", name: "", phone: "", service: "", minutes: "30", notes: "", status: "COMPLETED" as AttendanceTerminalStatus });
   const [correction, setCorrection] = useState({ reason: "", service: "", minutes: "", notes: "", status: "COMPLETED" as AttendanceTerminalStatus });
@@ -82,6 +86,17 @@ export function AttendanceWorkspace() {
   }, [statusFilter, walkInFilter]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("reservation");
+    if (!id) return;
+    void getAgendaReservation(id).then((booking) => {
+      setLinkedReservation(booking);
+      setPerformedPositions(booking.items.map((item) => item.position));
+      setForm((current) => ({ ...current, reservationId: id, staffMemberId: booking.reservation.staffMemberId }));
+      setCreating(true);
+    }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "No se pudo abrir el turno"));
+  }, []);
 
   useEffect(() => {
     listAttendanceProfessionals().then(setProfessionals).catch(() => undefined);
@@ -162,9 +177,10 @@ export function AttendanceWorkspace() {
         <section className="agenda-create" aria-label="Registrar atención">
           <h2>Nueva atención</h2>
           <div className="agenda-form">
-            <label>Reserva (opcional)
-              <input value={form.reservationId} onChange={(event) => setForm((value) => ({ ...value, reservationId: event.target.value.trim() }))} placeholder="Sin reserva = walk-in" />
-            </label>
+            {linkedReservation ? <p>Turno de {linkedReservation.reservation.customerName} · {linkedReservation.reservation.localDate}</p> :
+              <label>Reserva (opcional)
+                <input value={form.reservationId} onChange={(event) => setForm((value) => ({ ...value, reservationId: event.target.value.trim() }))} placeholder="Sin reserva = walk-in" />
+              </label>}
             <label>Profesional responsable
               {sharedScope ? (
                 <select value={form.staffMemberId} onChange={(event) => setForm((value) => ({ ...value, staffMemberId: event.target.value }))}>
@@ -177,10 +193,23 @@ export function AttendanceWorkspace() {
                 <input value={staffMemberId} readOnly aria-label="Profesional responsable" />
               )}
             </label>
+            {!linkedReservation && <>
             <label>Nombre del cliente<input value={form.name} onChange={(event) => setForm((value) => ({ ...value, name: event.target.value }))} placeholder="Obligatorio en walk-in" /></label>
             <label>Teléfono<input value={form.phone} onChange={(event) => setForm((value) => ({ ...value, phone: event.target.value }))} placeholder="Obligatorio en walk-in" /></label>
             <label>Servicio realizado<input value={form.service} onChange={(event) => setForm((value) => ({ ...value, service: event.target.value }))} /></label>
             <label>Duración total (min)<input type="number" min="0" max="1440" value={form.minutes} onChange={(event) => setForm((value) => ({ ...value, minutes: event.target.value }))} /></label>
+            </>}
+            {linkedReservation && <fieldset>
+              <legend>Servicios realizados</legend>
+              {linkedReservation.items.map((item) => (
+                <label className="check-row" key={item.position}>
+                  <input type="checkbox" checked={performedPositions.includes(item.position)} onChange={(event) => {
+                    const checked = event.target.checked;
+                    setPerformedPositions((positions) => checked ? [...positions, item.position] : positions.filter((position) => position !== item.position));
+                  }} /> {item.serviceName}
+                </label>
+              ))}
+            </fieldset>}
             <label>Estado de la atención
               <select value={form.status} onChange={(event) => setForm((value) => ({ ...value, status: event.target.value as AttendanceTerminalStatus }))}>
                 <option value="COMPLETED">Completada</option>
@@ -190,19 +219,25 @@ export function AttendanceWorkspace() {
             </label>
           </div>
           <Button
-            disabled={busy || !(sharedScope ? form.staffMemberId : staffMemberId) || !form.service.trim() || (!form.reservationId.trim() && (!form.name.trim() || !form.phone.trim()))}
+            disabled={busy || !(sharedScope ? form.staffMemberId : staffMemberId)
+              || (linkedReservation ? performedPositions.length === 0 : !form.service.trim())
+              || (!form.reservationId.trim() && (!form.name.trim() || !form.phone.trim()))}
             onClick={() => run(async () => {
-              const services = [{ name: form.service.trim(), durationMinutes: Number(form.minutes) || 0 }];
+              const services = linkedReservation ? linkedReservation.items.filter((item) => performedPositions.includes(item.position)).map((item) => ({
+                serviceId: item.serviceId, name: item.serviceName, durationMinutes: item.durationMinutes,
+                priceMinor: item.priceMinor, currency: "ARS" as const
+              })) : [{ name: form.service.trim(), durationMinutes: Number(form.minutes) || 0 }];
               const responsible = sharedScope ? form.staffMemberId : staffMemberId;
               if (form.reservationId.trim()) {
                 const { registerAttendanceFromReservation } = await import("./api");
-                await registerAttendanceFromReservation({
+                const registered = await registerAttendanceFromReservation({
                   reservationId: form.reservationId.trim(),
                   attendedByStaffMemberId: responsible,
                   servicesPerformedSnapshot: services,
                   status: form.status,
                   ...(form.notes.trim() ? { notes: form.notes.trim() } : {})
                 });
+                await open(registered.attendanceId);
               } else {
                 await registerWalkIn({
                   attendedByStaffMemberId: responsible,
@@ -213,6 +248,7 @@ export function AttendanceWorkspace() {
                 });
               }
               setCreating(false);
+              setLinkedReservation(null);
               setForm({ reservationId: "", staffMemberId: "", name: "", phone: "", service: "", minutes: "30", notes: "", status: "COMPLETED" });
             }, "Atención registrada.")}
           >
@@ -337,6 +373,16 @@ export function AttendanceWorkspace() {
                 Marcar como completada
               </Button>
             </div>
+          )}
+
+          {can("sales.create") && detail.attendance.status !== "IN_PROGRESS" && detail.attendance.servicesPerformed.length > 0 && (
+            <Button disabled={busy} onClick={() => run(async () => {
+              const id = detail.attendance.id;
+              const operation = stableOperationId(`attendance-sale-${id}`);
+              const result = await financeApi.createSale({ attendanceId: id }, operation);
+              releaseOperationId(operation);
+              window.location.assign(`/ventas?sale=${result.data.id}`);
+            }, "Venta creada.")}>Crear venta de la atención</Button>
           )}
 
           {canCorrect && detail.attendance.status !== "IN_PROGRESS" && (
