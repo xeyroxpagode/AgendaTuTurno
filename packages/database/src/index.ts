@@ -19,6 +19,7 @@ export * from "./booking.js";
 export * from "./absence.js";
 export * from "./attendance.js";
 export * from "./inventory.js";
+export * from "./courses.js";
 export function inventorySchemaSummary(){
   return [inventoryItems,inventoryLocations,inventoryLocationAccess,inventoryMovements,inventoryEntries,inventoryPositions,inventoryConsumptions,inventoryCounts,inventoryAdjustments,inventoryMinimums,inventoryCommitments].map(table=>{
     const c=getTableConfig(table);return {name:c.name,columns:c.columns.map(column=>({name:column.name,notNull:column.notNull,type:column.getSQLType()}))};
