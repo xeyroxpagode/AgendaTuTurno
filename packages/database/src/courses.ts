@@ -1,4 +1,4 @@
-import { bigint, date, index, jsonb, pgSchema, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, date, index, integer, jsonb, pgSchema, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /**
  * H07 · Cursos y sesiones — espejo Drizzle de las migraciones
@@ -48,6 +48,8 @@ export const courseSessions = coursesSchema.table("course_sessions", {
   courseId: uuid("course_id").notNull(),
   instructorStaffMemberId: uuid("instructor_staff_member_id").notNull(),
   localDate: date("local_date").notNull(),
+  localStartMinute: integer("local_start_minute"),
+  durationMinutes: integer("duration_minutes"),
   timezone: text("timezone").notNull(),
   visibleStartAt: timestamp("visible_start_at", { withTimezone: true }),
   occupiedStartAt: timestamp("occupied_start_at", { withTimezone: true }).notNull(),

@@ -73,7 +73,8 @@ export type ServiceRequirement = {
 
 export type AllocationClaimInput = {
   businessId: string;
-  sourceType: "RESERVATION" | "OPERATIONAL_BLOCK";
+  // H07: COURSE_SESSION usa `claimCourseSession` (propio), nunca `claimAllocation`.
+  sourceType: "RESERVATION" | "OPERATIONAL_BLOCK" | "COURSE_SESSION";
   sourceId: string;
   serviceIds: string[];
   localDate: string;
