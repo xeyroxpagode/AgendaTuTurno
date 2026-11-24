@@ -13,6 +13,8 @@ export * from "./absence.js";
 export * from "./attendance.js";
 export * from "./inventory.js";
 export * from "./courses.js";
+export * from "./economy.js";
+export * from "./h05.js";
 
 export const clientsSchema = pgSchema("clients");
 
