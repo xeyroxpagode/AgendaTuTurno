@@ -12,6 +12,10 @@ import { rows, sql } from "../../lib/sql.js";
  */
 export async function selfEconomy(actor: Actor, raw: unknown) {
   authorizationService.require(actor, "economy.self.read");
+  // CL-13 · la vista propia es EXCLUSIVA del Barber. Owner/Recepción pueden
+  // tener la capability en el catálogo (H03.U06), pero su autoridad sobre la
+  // economía es `economy.*` de Business, no esta lectura auto-restringida.
+  if (actor.role !== "BARBER") throw new DomainError("ECONOMY_FORBIDDEN", "Own-economy read is limited to the Barber role", 403);
   const input = selfEconomyQuerySchema.parse(raw);
   const staffId = actor.staffMemberId;
   if (!staffId) throw new DomainError("FORBIDDEN", "No StaffMember is linked to this actor", 403);

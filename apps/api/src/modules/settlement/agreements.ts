@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { DomainError, createAgreementVersionSchema, type Capability } from "@youngkingz/contracts";
+import { createAgreementVersionSchema, type Capability } from "@youngkingz/contracts";
 import type { Actor } from "../iam/authorization.js";
 import { authorizationService } from "../iam/authorization.js";
 import { audit, executeOperation, revalidateAuthority, type Tx } from "../system/operations.js";

@@ -105,7 +105,7 @@ describe("H08 · Economía sobre PostgreSQL QA real", () => {
     expect(own.settlements.length).toBeGreaterThan(0);
     expect(JSON.stringify(own).includes(ORG)).toBe(false);
     const owner = await authenticateQaActor(QA_EMAILS.owner);
-    await expect(selfEconomy(owner, { from: from.toISOString(), to: to.toISOString() })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(selfEconomy(owner, { from: from.toISOString(), to: to.toISOString() })).rejects.toMatchObject({ code: "ECONOMY_FORBIDDEN" });
   });
 
   it("cross-business: actor B2 no puede operar sobre la economía de B1", async () => {

@@ -86,7 +86,9 @@ async function loadBlocks(client: SqlClient,businessId:string,staffMemberId:stri
     unavailable: unavailable.map(row=>({startMinute:Number(row.startMinute),endMinute:Number(row.endMinute)})),
     operational: allocations.filter(row=>row.sourceType==="OPERATIONAL_BLOCK").map(row=>({startMinute:Number(row.startMinute),endMinute:Number(row.endMinute)})),
     occupied: allocations.map(row=>({startMinute:Number(row.startMinute),endMinute:Number(row.endMinute)})),
-    confirmedMinutes: allocations.filter(row=>row.sourceType==="RESERVATION").reduce((sum,row)=>sum+Number(row.minutes),0)
+    // H07 · la carga del instructor incluye también las sesiones de curso:
+    // una sesión confirmada es tiempo ocupado real del mismo recurso.
+    confirmedMinutes: allocations.filter(row=>row.sourceType==="RESERVATION"||row.sourceType==="COURSE_SESSION").reduce((sum,row)=>sum+Number(row.minutes),0)
   };
 }
 

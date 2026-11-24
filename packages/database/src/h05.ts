@@ -1,4 +1,4 @@
-import { bigint, index, jsonb, pgSchema, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, index, pgSchema, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /**
  * H08 · M8 · Espejo Drizzle de H05 (F-23 / N-10).

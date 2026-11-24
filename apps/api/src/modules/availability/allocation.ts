@@ -20,6 +20,21 @@ export async function quoteAllocation(tx: Tx, input: AllocationClaimInput, now: 
   });
 }
 
+/**
+ * H07 · Traducción CONTEXTUAL de SQLSTATE.
+ *
+ * 23P01 (EXCLUDE) y 23505 (UNIQUE) son siempre conflictos de ocupación.
+ * 22000 (intervalo inválido) y 23514 (CHECK violado) son errores de intervalo,
+ * NUNCA un conflicto de horario. Un error de unicidad económica no debe
+ * convertirse en SLOT_CONFLICT: ese mapeo depende de la operación concreta.
+ */
+export function translateAllocationError(error: unknown): never {
+  const sqlState = (error as { code?: string }).code;
+  if (sqlState === "23P01" || sqlState === "23505") throw new DomainError("SLOT_CONFLICT", "The resource was occupied concurrently", 409);
+  if (sqlState === "22000" || sqlState === "23514") throw new DomainError("INVALID_INTERVAL", "The requested interval is invalid", 400);
+  throw error;
+}
+
 export async function claimAllocation(tx: Tx, input: AllocationClaimInput, now: Date = new Date()) {
   await lockAvailabilityGuard(tx, input.businessId);
   const slot = await quoteAllocation(tx, input, now);
@@ -28,9 +43,7 @@ export async function claimAllocation(tx: Tx, input: AllocationClaimInput, now: 
     for (const serviceId of input.serviceIds) await tx`insert into availability.allocation_service_requirements(business_id,allocation_id,service_id) values (${input.businessId},${allocation!.id},${serviceId})`;
     return { allocationId: allocation!.id as string, status: allocation!.status as "ACTIVE", ...slot };
   } catch (error) {
-    const sqlState = (error as { code?: string }).code;
-    if (sqlState === "23P01" || sqlState === "23505") throw new DomainError("SLOT_CONFLICT", "The resource was occupied concurrently", 409);
-    throw error;
+    translateAllocationError(error);
   }
 }
 
