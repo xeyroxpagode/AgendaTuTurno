@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MAX_AMOUNT_MINOR } from "./money.js";
+import { MAX_AMOUNT_MINOR } from "@youngkingz/contracts/money";
 
 /** H08 · CAP-08-01..06. Unidades menores de ARS. Sin tasas universales. */
 
