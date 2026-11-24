@@ -25,14 +25,14 @@ async function freePeriod(sql: postgres.Sql, year: number, days = 1) {
   return { from: new Date(row.from), to: new Date(row.to) };
 }
 
-async function seedFact(sql: postgres.Sql, occurredAt: Date, netMinor: number, status = "COMPLETED", discountMinor = 0) {
+async function seedFact(sql: postgres.Sql, occurredAt: Date, netMinor: number, status = "COMPLETED", discountMinor = 0, staffMemberId = BARBER) {
   const attendanceId = randomUUID();
   const saleId = randomUUID();
   const operationId = randomUUID();
   await sql`insert into system.operation_attempts(operation_id,business_id,actor_account_id,command_name,request_hash,principal_kind,principal_ref)
     values (${operationId},${B1},${OWNER_ACCOUNT},'qa.gap',${randomUUID()},'STAFF',${OWNER_ACCOUNT})`;
   await sql`insert into attendance.attendances(id,business_id,staff_member_id,attended_by_staff_member_id,walk_in,status,started_at,finished_at,services_performed_snapshot,contact_snapshot)
-    values (${attendanceId},${B1},${BARBER},${BARBER},true,${status},${occurredAt.toISOString()},${occurredAt.toISOString()},
+    values (${attendanceId},${B1},${staffMemberId},${staffMemberId},true,${status},${occurredAt.toISOString()},${occurredAt.toISOString()},
             '[]'::jsonb,'{"name":"QA"}'::jsonb)`;
   await sql`insert into sales.sales(id,business_id,operation_id,status,source,attendance_id,total_minor,actor_account_id,confirmed_at)
     values (${saleId},${B1},${operationId},'CONFIRMED','ATTENDANCE',${attendanceId},${netMinor},${OWNER_ACCOUNT},${occurredAt.toISOString()})`;
@@ -141,5 +141,30 @@ describe("H08 — oráculos contractuales pendientes sobre PostgreSQL QA real", 
       values (${B1},${first},'SALE',${sourceId},'COMMISSION',100)`;
     await expect(sql`insert into econ.settlement_sources(business_id,settlement_id,source_type,source_id,component,amount_minor)
       values (${B1},${second},'SALE',${sourceId},'COMMISSION',100)`).rejects.toMatchObject({ code: "23505" });
+  });
+
+  it("CL-07: acuerdo creado dentro del período con hechos posteriores es aplicable en la estimación", async () => {
+    const owner = await authenticateQaActor(QA_EMAILS.owner);
+    const staff = "bbbbbbb2-2222-4222-8222-222222222222";
+    // Fixture aislado de Recepción: se limpia el acuerdo para que el oráculo sea repetible.
+    await sql`delete from econ.agreement_versions where business_id=${B1}
+      and agreement_id in (select id from econ.agreements where business_id=${B1} and staff_member_id=${staff})`;
+    await sql`delete from econ.agreements where business_id=${B1} and staff_member_id=${staff}`;
+    const from = new Date(Date.now() - 3 * 86400000);
+    const to = new Date(Date.now() + 3 * 86400000);
+    const occurredAt = new Date(Date.now() + 86400000);
+    await createAgreementVersion(owner, {
+      staffMemberId: staff, modality: "COMMISSION", commissionBase: "REALIZED", bps: 1000,
+      validFrom: from.toISOString(), validTo: to.toISOString()
+    }, randomUUID());
+    const { saleId } = await seedFact(sql, occurredAt, 10000, "COMPLETED", 0, staff);
+    const sources = await sql.begin((tx) => eligibleSources(tx as never, B1, staff, from, to));
+    expect(sources.some((source) => source.sourceId === saleId && source.commissionMinor === 1000n)).toBe(true);
+    // El oráculo debe resolver la versión en el momento del hecho, no en `from`:
+    // el acuerdo se creó después de `from` pero antes de la prestación.
+    const estimate = await sql.begin((tx) => calculateEstimate(tx as never, owner, { staffMemberId: staff, from, to }));
+    expect(estimate.state).toBe("OPEN_ESTIMATE");
+    expect(estimate.payableMinor).toBe(sources.reduce((total, source) => total + source.commissionMinor, 0n).toString());
+    expect(estimate.lines.some((line) => line.sourceId === saleId && line.amountMinor === "1000")).toBe(true);
   });
 });

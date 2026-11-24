@@ -106,8 +106,16 @@ export async function calculateEstimate(
   await lockAvailabilityGuard(tx, actor.businessId);
   await lockBusiness(tx, actor.businessId);
   await lockAgreementTerms(tx, actor.businessId, input.staffMemberId);
-  const version = await applicableVersion(tx, actor.businessId, input.staffMemberId, input.from);
   const sources = await eligibleSources(tx, actor.businessId, input.staffMemberId, input.from, input.to);
+  // CL-07: la versión aplicable se resuelve en el momento de los HECHOS del
+  // período, no en el límite arbitrario `from`. `eligibleSources` ya exige
+  // `created_at <= occurred_at` para cada fuente; usar `from` descartaba
+  // acuerdos creados dentro del período cuyas prestaciones son posteriores
+  // y devolvía NOT_CONFIGURED aunque la atribución sí era válida.
+  const referenceAt = sources.length
+    ? new Date(Math.max(...sources.map((source) => source.occurredAt.getTime())))
+    : input.from;
+  const version = await applicableVersion(tx, actor.businessId, input.staffMemberId, referenceAt);
   const periodTerms = await periodFixedRent(tx, actor.businessId, input.staffMemberId, input.from, input.to);
   const agreementVersions = periodTerms.versions;
   const termsHash = agreementVersions.length === 1 ? agreementVersions[0]!.termsHash
