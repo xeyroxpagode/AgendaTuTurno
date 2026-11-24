@@ -46,7 +46,10 @@ export async function proxy(request: NextRequest) {
   // Las superficies públicas CLIENT nunca se protegen, aunque caigan bajo /cliente/*.
   const isClientPublic = CLIENT_PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
   const isClientPrivate = !isClientPublic && CLIENT_PRIVATE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  // H07: /cursos es Staff; /cursos/publicos es Discovery público y NO se protege.
+  const isCourseStaff = pathname.startsWith("/cursos") && !pathname.startsWith("/cursos/publicos");
   const isStaffProtected =
+    isCourseStaff ||
     pathname.startsWith("/team") ||
     pathname.startsWith("/account") ||
     pathname.startsWith("/context") ||

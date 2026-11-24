@@ -1,0 +1,5 @@
+/* H08 · Economía — usa variables y clases del design system existente. */
+.estimate-panel{border:1px solid var(--line);border-radius:12px;padding:18px;margin-top:18px;background:var(--raised);display:grid;gap:10px}
+.estimate-panel p{margin:0}
+.estimate-panel .audit-list{margin-bottom:12px}
+@media(max-width:560px){.estimate-panel{padding:12px}}

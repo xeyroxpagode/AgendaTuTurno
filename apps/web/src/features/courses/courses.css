@@ -1,0 +1,7 @@
+/* H07 · Cursos — reutiliza el design system; sólo estructura local. */
+.record-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.record-row{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--raised)}
+.record-row>div:first-child{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.record-row p{color:var(--muted);margin:8px 0}
+.row-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+@media(max-width:560px){.row-actions .button{flex:1 1 auto;justify-content:center}}
