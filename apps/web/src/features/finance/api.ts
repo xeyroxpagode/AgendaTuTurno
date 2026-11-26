@@ -32,7 +32,8 @@ export type CheckoutView = {
 export type MoneyView = {
   id: string; operationId: string; status: string; kind: string; amountMinor: number;
   confirmedMinor: number; availableMinor: number; refundedMinor: number;
-  components: Array<{ method: string; outcome: string; amountMinor: number; changeMinor: number }>;
+  components: Array<{ id: string; method: string; outcome: string; amountMinor: number; changeMinor: number; refundOfComponentId?: string | null }>;
+  allocations: Array<{ id: string; targetType: string; targetId: string; amountMinor: number }>;
   createdAt: string;
 };
 

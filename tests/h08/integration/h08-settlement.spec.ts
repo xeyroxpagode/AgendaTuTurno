@@ -405,18 +405,12 @@ describe("H08 · Economía sobre PostgreSQL QA real", () => {
         values (${randomUUID()},${B1},${saleId},${position},'SERVICE','Servicio QA',1,${total},0,${total})`;
     }
     // Cobro parcial de 5000 y refund de 2000 vinculado por refund_of_id (H05 real).
-    const paymentOp = randomUUID();
-    await sql`insert into system.operation_attempts(operation_id,business_id,actor_account_id,command_name,request_hash,principal_kind,principal_ref)
-      values (${paymentOp},${B1},${OWNER_ACCOUNT},'qa.payment',${randomUUID()},'STAFF',${OWNER_ACCOUNT})`;
-    await sql`insert into money.money_operations(id,business_id,operation_id,kind,status,sale_id,amount_minor,confirmed_minor,currency,actor_account_id)
-      values (${paymentOp},${B1},${paymentOp},'PAYMENT','SUCCEEDED',${saleId},5000,5000,'ARS',${OWNER_ACCOUNT})`;
-    await sql`insert into money.money_allocations(id,business_id,money_operation_id,target_type,target_id,amount_minor,actor_account_id,operation_id)
-      values (${randomUUID()},${B1},${paymentOp},'SALE',${saleId},5000,${OWNER_ACCOUNT},${paymentOp})`;
-    const refundOp = randomUUID();
-    await sql`insert into system.operation_attempts(operation_id,business_id,actor_account_id,command_name,request_hash,principal_kind,principal_ref)
-      values (${refundOp},${B1},${OWNER_ACCOUNT},'qa.refund',${randomUUID()},'STAFF',${OWNER_ACCOUNT})`;
-    await sql`insert into money.money_operations(id,business_id,operation_id,kind,status,refund_of_id,amount_minor,confirmed_minor,currency,actor_account_id)
-      values (${refundOp},${B1},${refundOp},'REFUND','SUCCEEDED',${paymentOp},2000,2000,'ARS',${OWNER_ACCOUNT})`;
+    const payment = await createMoneyOperation(owner, {
+      saleId, components: [{ method: "CARD", amountMinor: 5000, outcome: "CONFIRMED", reference: "D20-H08-PAYMENT", evidenceReference: "D20-H08-PAYMENT-EVIDENCE" }]
+    }, randomUUID());
+    await refundMoney(owner, payment.data.id, {
+      amountMinor: 2000, reason: "Reintegro causal con linaje canónico", evidenceReference: "D20-H08-REFUND-EVIDENCE"
+    }, randomUUID());
 
     const estimate = await sql.begin((tx) => calculateEstimate(tx as never, owner, { staffMemberId: BARBER, from: p0From, to: p0To }));
     // Base = 5000 cobrado - 2000 devuelto = 3000, comisión 10% = 300.

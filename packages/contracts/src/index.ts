@@ -19,6 +19,7 @@ export * from "@youngkingz/contracts/corrections";
 export * from "@youngkingz/contracts/orders";
 export * from "@youngkingz/contracts/courses";
 export * from "@youngkingz/contracts/economy";
+export * from "@youngkingz/contracts/reporting";
 
 export const roles = ["OWNER", "RECEPTIONIST", "BARBER"] as const;
 export const roleSchema = z.enum(roles);

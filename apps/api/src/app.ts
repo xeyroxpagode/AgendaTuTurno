@@ -31,6 +31,7 @@ import { registerCorrectionsRoutes } from "./modules/corrections/routes.js";
 import { registerOrdersRoutes } from "./modules/orders/routes.js";
 import { registerCourseRoutes } from "./modules/courses/routes.js";
 import { registerEconomyRoutes } from "./modules/settlement/routes.js";
+import { registerReportingRoutes } from "./modules/reporting/routes.js";
 import "./plugins/auth.js";
 
 const uuidParam = z.object({ id: z.string().uuid() });
@@ -129,5 +130,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerOrdersRoutes(app);
   await registerCourseRoutes(app, authenticate);
   await registerEconomyRoutes(app, authenticate);
+  await registerReportingRoutes(app, authenticate);
   return app;
 }

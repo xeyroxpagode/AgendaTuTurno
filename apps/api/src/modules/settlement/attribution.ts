@@ -1,4 +1,4 @@
-import { commissionMinor, parseMinor } from "@youngkingz/contracts";
+import { commissionMinor, DomainError, parseMinor } from "@youngkingz/contracts";
 import type { Tx } from "../system/operations.js";
 
 export type EconomicSource = {
@@ -83,21 +83,81 @@ export async function eligibleSources(
         from money.money_allocations ma join money.money_operations mo
           on mo.business_id=ma.business_id and mo.id=ma.money_operation_id and mo.status='SUCCEEDED' and mo.kind='PAYMENT'
         where ma.business_id=${businessId} and ma.target_type='SALE' and ma.target_id=${sale.sale_id}` as unknown as { amount: string; operations: string[] }[];
-      // H05 registra REFUND con `refund_of_id` hacia el PAGO ORIGINAL y NO con
-      // sale_id. Resolver el linaje: refund -> pago original -> sale_id.
-      const [refunded] = await tx`
-        select coalesce(sum(r.amount_minor),0)::text amount, coalesce(array_agg(r.id order by r.id),array[]::uuid[]) operations
+      // D-20: el origen identifica el pago, no la distribución económica de
+      // un anticipo entre ventas y saldo sin asignar. Un histórico sin esa
+      // evidencia no equivale a cero devuelto ni admite reparto por importe.
+      const ambiguous = await tx`
+        select r.id
         from money.money_operations r
         join money.money_operations origin
           on origin.business_id=r.business_id and origin.id=r.refund_of_id
         where r.business_id=${businessId} and r.kind='REFUND' and r.status='SUCCEEDED'
-          and (origin.sale_id=${sale.sale_id} or r.sale_id=${sale.sale_id} or (
-            origin.sale_id is null and origin.confirmed_minor=(
-              select sum(a.amount_minor) from money.money_allocations a
-               where a.business_id=origin.business_id and a.money_operation_id=origin.id
-                 and a.target_type='SALE' and a.target_id=${sale.sale_id}
+          and not exists (
+            select 1 from money.refund_attributions ra
+             where ra.business_id=r.business_id and ra.refund_id=r.id
+          )
+          and (
+            (r.sale_id is null and (
+              origin.sale_id is null
+              or exists (
+                select 1 from money.money_allocations other_a
+                where other_a.business_id=origin.business_id and other_a.money_operation_id=origin.id
+                  and (other_a.target_type<>'SALE' or other_a.target_id<>origin.sale_id or other_a.created_at>r.created_at)
+              )
+              or (select coalesce(sum(coverage.amount_minor),0) from money.money_allocations coverage
+                   where coverage.business_id=origin.business_id and coverage.money_operation_id=origin.id) <> origin.confirmed_minor
+            ))
+            or (r.sale_id is not null and not exists (
+              select 1 from money.money_allocations explicit_a
+              where explicit_a.business_id=origin.business_id and explicit_a.money_operation_id=origin.id
+                and explicit_a.target_type='SALE' and explicit_a.target_id=r.sale_id
+            ))
+          )
+          and exists (
+            select 1 from money.money_allocations a
+             where a.business_id=origin.business_id and a.money_operation_id=origin.id
+               and a.target_type='SALE' and a.target_id=${sale.sale_id}
+          )
+        order by r.id`;
+      if (ambiguous.length) {
+        throw new DomainError("SETTLEMENT_CONFLICT", "La atribución de una devolución histórica es desconocida; no se puede calcular una base definitiva", 409, {
+          attributionState: "UNKNOWN", saleId: sale.sale_id,
+          refundIds: ambiguous.map((row) => String(row.id))
+        });
+      }
+
+      // Nuevos refunds: cantidades explícitas por allocation canónica.
+      // Legacy: sólo referencias directas inequívocas. La suma anterior comprueba
+      // cobertura completa/sin excedente; NO selecciona una venta por importe.
+      const [refunded] = await tx`
+        select coalesce(sum(case when exists (
+          select 1 from money.refund_attributions all_ra
+           where all_ra.business_id=r.business_id and all_ra.refund_id=r.id
+        ) then (
+          select coalesce(sum(ra.amount_minor),0)
+          from money.refund_attributions ra
+          join money.money_allocations a
+            on a.business_id=ra.business_id and a.id=ra.original_allocation_id
+          where ra.business_id=r.business_id and ra.refund_id=r.id
+            and a.money_operation_id=origin.id and a.target_type='SALE' and a.target_id=${sale.sale_id}
+        ) else r.amount_minor end),0)::text amount,
+        coalesce(array_agg(r.id order by r.id),array[]::uuid[]) operations
+        from money.money_operations r
+        join money.money_operations origin
+          on origin.business_id=r.business_id and origin.id=r.refund_of_id
+        where r.business_id=${businessId} and r.kind='REFUND' and r.status='SUCCEEDED'
+          and (
+            exists (
+              select 1 from money.refund_attributions ra
+              join money.money_allocations a
+                on a.business_id=ra.business_id and a.id=ra.original_allocation_id
+              where ra.business_id=r.business_id and ra.refund_id=r.id
+                and a.money_operation_id=origin.id and a.target_type='SALE' and a.target_id=${sale.sale_id}
+            ) or (
+              not exists (select 1 from money.refund_attributions ra where ra.business_id=r.business_id and ra.refund_id=r.id)
+              and (r.sale_id=${sale.sale_id} or (r.sale_id is null and origin.sale_id=${sale.sale_id}))
             )
-          ))` as unknown as { amount: string; operations: string[] }[];
+          )` as unknown as { amount: string; operations: string[] }[];
       collectedOperations = collected!.operations;
       refundOperations = refunded!.operations;
       const net = parseMinor(collected!.amount) - parseMinor(refunded!.amount);

@@ -301,7 +301,10 @@ export async function resumeCheckout(actor: Actor, checkoutId: string, body: unk
       await performRefund(tx, actor, checkout.moneyOperationId, {
         amountMinor: checkout.confirmedMinor,
         reason: input.reason,
-        evidenceReference: `checkout:${checkoutId}`
+        evidenceReference: input.evidenceReference,
+        cashSessionId: input.cashSessionId,
+        components: input.components,
+        attributions: input.attributions,
       }, operationId);
       await tx`
         update checkout.checkouts set status='RESOLVED', incident_reason=null, revision=revision+1, updated_at=now()

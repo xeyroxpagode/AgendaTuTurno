@@ -18,7 +18,7 @@ export async function listMoneyOperations(actor: Actor, query: z.infer<typeof mo
     select m.id, m.operation_id "operationId", m.kind::text kind, m.status::text status,
            m.sale_id "saleId", m.obligation_id "obligationId", m.refund_of_id "refundOfId",
            m.amount_minor::int "amountMinor", m.confirmed_minor::int "confirmedMinor",
-           (m.confirmed_minor-allocated.total)::int "availableMinor",
+           (m.confirmed_minor-allocated.total-unallocated_refunds.total)::int "availableMinor",
            allocated.total::int "allocatedMinor", refunded.total::int "refundedMinor",
            m.change_minor::int "changeMinor", m.currency, m.payer_name "payerName",
            m.economic_holder_name "economicHolderName", m.created_at "createdAt", m.updated_at "updatedAt"
@@ -27,6 +27,9 @@ export async function listMoneyOperations(actor: Actor, query: z.infer<typeof mo
         where a.business_id=m.business_id and a.money_operation_id=m.id) allocated
       cross join lateral (select coalesce(sum(r.confirmed_minor),0) total from money.money_operations r
         where r.business_id=m.business_id and r.refund_of_id=m.id and r.status='SUCCEEDED') refunded
+      cross join lateral (select coalesce(sum(a.amount_minor),0) total from money.refund_attributions a
+        join money.money_operations r on r.business_id=a.business_id and r.id=a.refund_id
+        where r.business_id=m.business_id and r.refund_of_id=m.id and a.original_allocation_id is null) unallocated_refunds
      where m.business_id = ${actor.businessId}
        ${query.status !== "ALL" ? sql`and m.status = ${query.status}` : sql``}
        ${query.saleId ? sql`and m.sale_id = ${query.saleId}` : sql``}
