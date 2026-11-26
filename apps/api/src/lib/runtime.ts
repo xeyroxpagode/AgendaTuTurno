@@ -24,8 +24,9 @@ export const runtime = {
   databaseUrl: process.env.DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:55322/postgres",
   supabaseUrl: process.env.SUPABASE_URL ?? "http://127.0.0.1:55321",
   serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
-  host: process.env.API_HOST ?? "127.0.0.1",
-  port: Number(process.env.API_PORT ?? 4100),
+  // Cloud (Render) inyecta HOST/PORT. API_HOST/API_PORT se conservan para QA local.
+  host: process.env.API_HOST ?? process.env.HOST ?? (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
+  port: Number(process.env.PORT ?? process.env.API_PORT ?? 4100),
   webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:3100",
   corsAllowlist: (process.env.CORS_ALLOWLIST ?? "http://localhost:3100").split(",").map((o) => o.trim()).filter(Boolean)
 };

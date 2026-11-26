@@ -1,0 +1,55 @@
+# YoungKingZ Cloud Free — despliegue reproducible en Render (plan Free).
+# No se usa Render Postgres: el plan Free expira a los 30 días. La DB es Supabase.
+# Los secretos se completan en el dashboard de Render (sync: false), nunca aquí.
+services:
+  - type: web
+    name: youngkingz-api-staging
+    runtime: node
+    plan: free
+    region: oregon
+    branch: cloud/free-deployment
+    autoDeploy: false
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @youngkingz/api build
+    startCommand: pnpm --filter @youngkingz/api start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: WEB_ORIGIN
+        sync: false
+      - key: CORS_ALLOWLIST
+        sync: false
+      - key: BOOKING_GUEST_KEY_V1
+        sync: false
+      - key: BOOKING_QUOTE_SECRET
+        sync: false
+      - key: BOOKING_RECOVERY_DELIVERY_CHANNEL
+        value: ENVELOPE
+      - key: ENABLE_CLIENT_BOOKING
+        value: "true"
+
+  - type: web
+    name: youngkingz-web-staging
+    runtime: node
+    plan: free
+    region: oregon
+    branch: cloud/free-deployment
+    autoDeploy: false
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @youngkingz/web build
+    startCommand: pnpm --filter @youngkingz/web start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
