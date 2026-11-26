@@ -285,6 +285,7 @@ export async function allocateMoney(actor: Actor, moneyOperationId: string, body
 
   return executeOperation({ actor, operationId, command: "money.allocate", payload: { moneyOperationId, ...input } }, async (tx) => {
     await lockBusiness(tx, actor.businessId);
+    await assertActorStillAuthorized(tx, actor, "money.allocate");
     const operation = await loadMoneyOperation(tx, actor.businessId, moneyOperationId, true);
     if (operation.kind !== "PAYMENT" || operation.confirmedMinor <= 0) {
       throw new DomainError("MONEY_NOT_CONFIRMED", "La operación no tiene dinero confirmado para asignar", 409, { status: operation.status });
@@ -292,7 +293,17 @@ export async function allocateMoney(actor: Actor, moneyOperationId: string, body
     const [allocated] = await tx`
       select coalesce(sum(amount_minor),0)::int total from money.money_allocations
        where business_id = ${actor.businessId} and money_operation_id = ${moneyOperationId}`;
-    const available = operation.confirmedMinor - Number(allocated?.total ?? 0);
+    const [returned] = await tx`
+      select coalesce(sum(a.amount_minor),0)::text total from money.refund_attributions a
+      join money.money_operations r on r.business_id=a.business_id and r.id=a.refund_id
+      where a.business_id=${actor.businessId} and r.refund_of_id=${moneyOperationId}
+        and a.original_allocation_id is null`;
+    const [legacy] = await tx`
+      select r.id from money.money_operations r where r.business_id=${actor.businessId}
+      and r.refund_of_id=${moneyOperationId} and not exists
+      (select 1 from money.refund_attributions a where a.business_id=r.business_id and a.refund_id=r.id)`;
+    if (legacy) throw conflict("El saldo tiene devoluciones históricas sin distribución comprobable");
+    const available = operation.confirmedMinor - Number(allocated?.total ?? 0) - Number(returned?.total ?? 0);
     if (input.amountMinor > available) {
       throw new DomainError("MONEY_ALLOCATION_EXCEEDED", "La asignación excede el dinero confirmado disponible", 409, { availableMinor: available });
     }
@@ -349,6 +360,8 @@ export async function refundMoney(actor: Actor, moneyOperationId: string, body: 
 export async function performRefund(
   tx: Tx, actor: Actor, moneyOperationId: string, input: z.infer<typeof moneyRefundInputSchema>, operationId: string
 ) {
+  // También Checkout atraviesa el contrato monetario, incluidos límites enteros.
+  input = moneyRefundInputSchema.parse(input);
   await lockBusiness(tx, actor.businessId);
   await assertActorStillAuthorized(tx, actor, "money.refund");
   const original = await loadMoneyOperation(tx, actor.businessId, moneyOperationId, true);
@@ -364,31 +377,87 @@ export async function performRefund(
     throw new DomainError("REFUND_EXCEEDS_AVAILABLE", "El refund excede el importe disponible para devolver", 409, { availableMinor: available });
   }
 
-  // El refund respeta el medio efectivamente utilizado (B-DEC-02).
-  const components = await loadComponents(tx, actor.businessId, original.id);
-  const originalCash = components
-    .filter((component) => component.method === "CASH" && component.outcome === "CONFIRMED")
-    .reduce((total, component) => total + component.amountMinor, 0);
-  const alreadyCashRefunded = await tx`
-    select coalesce(sum(c.amount_minor),0)::int total
-      from money.money_operations r
-      join money.money_components c on c.business_id = r.business_id and c.money_operation_id = r.id
-     where r.business_id = ${actor.businessId} and r.refund_of_id = ${original.id}
-       and r.status = 'SUCCEEDED' and c.method = 'CASH' and c.outcome = 'CONFIRMED'`;
-  const cashAvailable = Math.max(0, originalCash - Number(alreadyCashRefunded[0]?.total ?? 0));
-  const cashPart = Math.min(input.amountMinor, cashAvailable);
-  const externalPart = input.amountMinor - cashPart;
+  // D20: no prioridad por medio ni prorrateo. El origen debe ser demostrable.
+  const components = (await loadComponents(tx, actor.businessId, original.id))
+    .filter((component) => component.outcome === "CONFIRMED");
+  const previousComponents = await tx`
+    select c.refund_of_component_id origin, c.method, c.amount_minor::text amount
+    from money.money_components c join money.money_operations r
+      on r.business_id=c.business_id and r.id=c.money_operation_id
+    where r.business_id=${actor.businessId} and r.refund_of_id=${original.id} and r.status='SUCCEEDED'`;
+  const usedComponents = new Map<string, number>();
+  for (const previous of previousComponents) {
+    const candidates = components.filter((component) => component.method === previous.method);
+    const origin = previous.origin ? String(previous.origin) : candidates.length === 1 ? candidates[0]!.id : null;
+    if (!origin) throw conflict("Devolución histórica con componentes ambiguos; no se puede inferir el origen");
+    usedComponents.set(origin, (usedComponents.get(origin) ?? 0) + Number(previous.amount));
+  }
+  const remaining = components.map((component) => ({ component, amountMinor: component.amountMinor - (usedComponents.get(component.id) ?? 0) }))
+    .filter((entry) => entry.amountMinor > 0);
+  const selected: z.infer<typeof moneyRefundInputSchema>["components"] | null = input.components ?? (input.amountMinor === available
+    ? remaining.map((entry) => ({ originalComponentId: entry.component.id, amountMinor: entry.amountMinor }))
+    : remaining.length === 1 ? [{ originalComponentId: remaining[0]!.component.id, amountMinor: input.amountMinor }] : null);
+  if (!selected) throw conflict("Indique explícitamente los componentes originales de la devolución parcial");
+  if (new Set(selected.map((entry) => entry.originalComponentId)).size !== selected.length ||
+      selected.reduce((total, entry) => total + entry.amountMinor, 0) !== input.amountMinor) {
+    throw conflict("Los componentes deben ser únicos y sumar exactamente el importe de devolución");
+  }
+  const refundComponents: Array<MoneyComponent & { originalComponentId: string; evidenceReference?: string | undefined }> = selected.map((entry) => {
+    const source = remaining.find((candidate) => candidate.component.id === entry.originalComponentId);
+    if (!source || entry.amountMinor > source.amountMinor) throw conflict("El componente original no pertenece al cobro o excede su remanente");
+    const common = { amountMinor: entry.amountMinor, originalComponentId: entry.originalComponentId };
+    if (source.component.method === "CASH") {
+      const evidenceReference = entry.evidenceReference ?? input.evidenceReference;
+      if (!evidenceReference || evidenceReference.trim().length < 3) {
+        throw new DomainError("MONEY_EVIDENCE_REQUIRED", "La devolución en efectivo exige evidencia del reintegro, no una referencia de terminal", 400);
+      }
+      return { ...common, method: "CASH", tenderedMinor: entry.amountMinor, changeMinor: 0, outcome: "CONFIRMED", evidenceReference };
+    }
+    const external = { ...common, reference: entry.reference ?? input.evidenceReference, evidenceReference: entry.evidenceReference ?? input.evidenceReference };
+    return source.component.method === "TRANSFER"
+      ? { ...external, method: "TRANSFER", accredited: true }
+      : { ...external, method: "CARD", outcome: "CONFIRMED" };
+  });
+  assertExternalEvidence(refundComponents);
 
-  const refundComponents: MoneyComponent[] = [];
-  if (cashPart > 0) {
-    refundComponents.push({ method: "CASH", amountMinor: cashPart, tenderedMinor: cashPart, changeMinor: 0, outcome: "CONFIRMED" });
+  const allocations = await tx`
+    select id, amount_minor::text amount from money.money_allocations
+    where business_id=${actor.businessId} and money_operation_id=${original.id}`;
+  const unallocated = original.confirmedMinor - allocations.reduce((total, entry) => total + Number(entry.amount), 0);
+  const previousAttributions = await tx`
+    select a.original_allocation_id origin, a.amount_minor::text amount
+    from money.refund_attributions a join money.money_operations r
+      on r.business_id=a.business_id and r.id=a.refund_id
+    where r.business_id=${actor.businessId} and r.refund_of_id=${original.id}`;
+  const [legacy] = await tx`
+    select coalesce(sum(r.confirmed_minor),0)::text amount from money.money_operations r
+    where r.business_id=${actor.businessId} and r.refund_of_id=${original.id} and r.status='SUCCEEDED'
+      and not exists (select 1 from money.refund_attributions a where a.business_id=r.business_id and a.refund_id=r.id)`;
+  const uniqueOrigin = allocations.length === 0 ? null : allocations.length === 1 && unallocated === 0 ? String(allocations[0]!.id) : undefined;
+  if (Number(legacy?.amount ?? 0) > 0 && uniqueOrigin === undefined) throw conflict("Devoluciones históricas sin distribución inequívoca");
+  const usedAttributions = new Map<string | null, number>();
+  if (Number(legacy?.amount ?? 0) > 0) usedAttributions.set(uniqueOrigin!, Number(legacy!.amount));
+  for (const previous of previousAttributions) {
+    const key = previous.origin === null ? null : String(previous.origin);
+    usedAttributions.set(key, (usedAttributions.get(key) ?? 0) + Number(previous.amount));
   }
-  if (externalPart > 0) {
-    refundComponents.push({
-      method: "CARD", amountMinor: externalPart, outcome: "CONFIRMED",
-      reference: input.evidenceReference, evidenceReference: input.evidenceReference
-    });
+  const attributions = input.attributions ?? (uniqueOrigin !== undefined
+    ? [{ originalAllocationId: uniqueOrigin ?? undefined, amountMinor: input.amountMinor }] : null);
+  if (!attributions) throw conflict("Indique la distribución explícita entre asignaciones originales y saldo no asignado");
+  if (new Set(attributions.map((entry) => entry.originalAllocationId ?? null)).size !== attributions.length ||
+      attributions.reduce((total, entry) => total + entry.amountMinor, 0) !== input.amountMinor) {
+    throw conflict("Las atribuciones deben ser únicas y sumar exactamente el importe de devolución");
   }
+  for (const entry of attributions) {
+    const key = entry.originalAllocationId ?? null;
+    const allocation = key === null ? null : allocations.find((candidate) => candidate.id === key);
+    if (key !== null && !allocation) throw conflict("La asignación original no pertenece al cobro");
+    const limit = key === null ? unallocated : Number(allocation!.amount);
+    if (entry.amountMinor > limit - (usedAttributions.get(key) ?? 0)) throw conflict("La devolución excede el remanente del origen indicado");
+  }
+  const cashPart = refundComponents.filter((component) => component.method === "CASH").reduce((total, component) => total + component.amountMinor, 0);
+  const externalPart = input.amountMinor - cashPart;
+  const cashSession = cashPart > 0 ? await resolveCashSession(tx, actor, input.cashSessionId) : null;
 
   const amountMinor = refundComponents.reduce((total, component) => total + component.amountMinor, 0);
   const [row] = await tx`
@@ -400,22 +469,27 @@ export async function performRefund(
   let position = 1;
   for (const component of refundComponents) {
     await tx`
-      insert into money.money_components(business_id,money_operation_id,position,method,outcome,amount_minor,tendered_minor,change_minor,accredited,external_reference,evidence_reference,currency)
+      insert into money.money_components(business_id,money_operation_id,position,method,outcome,amount_minor,tendered_minor,change_minor,accredited,external_reference,evidence_reference,currency,refund_of_component_id)
       values (${actor.businessId},${row.id},${position},${component.method},'CONFIRMED',${component.amountMinor},
               ${component.method === "CASH" ? (component.tenderedMinor ?? component.amountMinor) : null},
               0,${component.method === "TRANSFER" ? component.accredited : null},
               ${component.method !== "CASH" ? component.reference ?? null : null},
-              ${component.method !== "CASH" ? component.evidenceReference ?? null : null},'ARS')`;
+              ${component.evidenceReference ?? null},'ARS',${component.originalComponentId})`;
     position += 1;
   }
 
   // El efectivo del refund sale de la CAJA VIGENTE. La caja histórica de
   // origen no se modifica nunca (F19, B-DEC-02).
   if (cashPart > 0) {
-    const session = await resolveCashSession(tx, actor, input.cashSessionId);
+    const session = cashSession!;
     await tx`
       insert into cash.cash_movements(business_id,cash_session_id,type,amount_minor,reason,money_operation_id,actor_account_id,operation_id)
       values (${actor.businessId},${session.id},'EXPENSE',${cashPart},${`Refund autorizado: ${input.reason}`},${row.id},${actor.accountId},${operationId})`;
+  }
+
+  for (const entry of attributions) {
+    await tx`insert into money.refund_attributions(business_id,refund_id,original_allocation_id,amount_minor)
+      values (${actor.businessId},${row.id},${entry.originalAllocationId ?? null},${entry.amountMinor})`;
   }
 
   await audit(tx, {

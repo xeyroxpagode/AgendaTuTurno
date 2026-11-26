@@ -48,6 +48,7 @@ export type MoneyComponentRow = {
   accredited: boolean | null;
   externalReference: string | null;
   evidenceReference: string | null;
+  refundOfComponentId: string | null;
   currency: string;
   createdAt: string;
 };
@@ -88,7 +89,7 @@ export async function loadComponents(tx: Tx, businessId: string, moneyOperationI
            method::text method, outcome::text outcome, amount_minor::int "amountMinor",
            tendered_minor::int "tenderedMinor", change_minor::int "changeMinor", accredited,
            external_reference "externalReference", evidence_reference "evidenceReference",
-           currency, created_at "createdAt"
+           refund_of_component_id "refundOfComponentId", currency, created_at "createdAt"
       from money.money_components
      where business_id = ${businessId} and money_operation_id = ${moneyOperationId}
      order by position`;
@@ -131,7 +132,14 @@ export async function moneySnapshot(tx: Tx, businessId: string, id: string) {
      where business_id = ${businessId} and refund_of_id = ${id} and status = 'SUCCEEDED'`;
   const allocated = await tx`
     select coalesce(sum(amount_minor),0)::int total from money.money_allocations
-     where business_id = ${businessId} and money_operation_id = ${id}`;
+      where business_id = ${businessId} and money_operation_id = ${id}`;
+  const [unallocatedRefunds] = await tx`
+    select coalesce(sum(a.amount_minor),0)::text total from money.refund_attributions a
+    join money.money_operations r on r.business_id=a.business_id and r.id=a.refund_id
+    where r.business_id=${businessId} and r.refund_of_id=${id} and a.original_allocation_id is null`;
+  const attributions = await tx`
+    select id, original_allocation_id "originalAllocationId", amount_minor::int "amountMinor"
+    from money.refund_attributions where business_id=${businessId} and refund_id=${id} order by id`;
   return {
     id: operation.id,
     businessId: operation.businessId,
@@ -143,7 +151,7 @@ export async function moneySnapshot(tx: Tx, businessId: string, id: string) {
     refundOfId: operation.refundOfId,
     amountMinor: operation.amountMinor,
     confirmedMinor: operation.confirmedMinor,
-    availableMinor: operation.confirmedMinor - Number(allocated[0]?.total ?? 0),
+    availableMinor: operation.confirmedMinor - Number(allocated[0]?.total ?? 0) - Number(unallocatedRefunds?.total ?? 0),
     allocatedMinor: Number(allocated[0]?.total ?? 0),
     refundedMinor: Number(refunded[0]?.total ?? 0),
     changeMinor: operation.changeMinor,
@@ -162,9 +170,11 @@ export async function moneySnapshot(tx: Tx, businessId: string, id: string) {
       changeMinor: component.changeMinor,
       accredited: component.accredited,
       externalReference: component.externalReference,
-      evidenceReference: component.evidenceReference
+      evidenceReference: component.evidenceReference,
+      refundOfComponentId: component.refundOfComponentId
     })),
     allocations: allocations as unknown as Array<{ id: string; targetType: string; targetId: string; amountMinor: number; createdAt: string }>,
+    attributions,
     createdAt: new Date(String(operation.createdAt)).toISOString(),
     updatedAt: new Date(String(operation.updatedAt)).toISOString(),
     resolvedAt: operation.resolvedAt ? new Date(String(operation.resolvedAt)).toISOString() : null
@@ -184,7 +194,15 @@ export async function availableMinor(tx: Tx, businessId: string, moneyOperationI
   const [row] = await tx`
     select coalesce(sum(amount_minor),0)::int total from money.money_allocations
      where business_id = ${businessId} and money_operation_id = ${moneyOperationId}`;
-  return operation.confirmedMinor - Number(row?.total ?? 0);
+  const [returned] = await tx`
+    select coalesce(sum(a.amount_minor),0)::text total from money.refund_attributions a
+    join money.money_operations r on r.business_id=a.business_id and r.id=a.refund_id
+    where r.business_id=${businessId} and r.refund_of_id=${moneyOperationId} and a.original_allocation_id is null`;
+  const [legacy] = await tx`select id from money.money_operations r
+    where r.business_id=${businessId} and r.refund_of_id=${moneyOperationId} and not exists
+    (select 1 from money.refund_attributions a where a.business_id=r.business_id and a.refund_id=r.id)`;
+  if (legacy) throw conflict("El saldo tiene devoluciones históricas sin distribución comprobable");
+  return operation.confirmedMinor - Number(row?.total ?? 0) - Number(returned?.total ?? 0);
 }
 
 /** Confirma que el saldo pendiente de una venta es el esperado. */

@@ -188,7 +188,7 @@ export type MoneyAllocationInput = z.infer<typeof moneyAllocationInputSchema>;
 /**
  * Refund parcial o total (D25/B-DEC-02).
  * Es un hecho monetario NUEVO que referencia el cobro original, conserva el
- * original, exige motivo y evidencia, respeta el medio usado y no puede
+ * original, exige motivo y evidencia del reintegro (referencia externa sólo si aplica), respeta el medio usado y no puede
  * superar el importe disponible para devolver.
  */
 export const moneyRefundInputSchema = z.object({
@@ -197,6 +197,18 @@ export const moneyRefundInputSchema = z.object({
   evidenceReference: z.string().trim().max(200).optional(),
   /** Sesión de caja VIGENTE donde se registra la salida de efectivo (si el medio es efectivo). */
   cashSessionId: z.string().uuid().optional(),
+  /** Selección del componente real de origen; nunca permite un medio alternativo. */
+  components: z.array(z.object({
+    originalComponentId: z.string().uuid(),
+    amountMinor: positiveAmountMinorSchema,
+    reference: z.string().trim().min(3).max(200).optional(),
+    evidenceReference: z.string().trim().min(3).max(200).optional(),
+  }).strict()).min(1).max(10).optional(),
+  /** Sin originalAllocationId declara explícitamente saldo NO asignado. */
+  attributions: z.array(z.object({
+    originalAllocationId: z.string().uuid().optional(),
+    amountMinor: positiveAmountMinorSchema,
+  }).strict()).min(1).max(100).optional(),
 }).strict();
 export type MoneyRefundInput = z.infer<typeof moneyRefundInputSchema>;
 

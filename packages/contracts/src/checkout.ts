@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { moneyComponentSchema } from "@youngkingz/contracts/money";
+import { moneyComponentSchema, moneyRefundInputSchema } from "@youngkingz/contracts/money";
 
 /**
  * H05 · CAP-05-06 Checkout — contratos compartidos.
@@ -72,7 +72,11 @@ export type CreateCheckoutInput = z.infer<typeof createCheckoutSchema>;
 export const resumeCheckoutSchema = z.object({
   resolution: z.enum(["DELIVER", "REFUND"]),
   reason: z.string().trim().min(3).max(500),
-  expectedRevision: z.number().int().min(1)
+  expectedRevision: z.number().int().min(1),
+  evidenceReference: z.string().trim().min(3).max(200).optional(),
+  cashSessionId: z.string().uuid().optional(),
+  components: moneyRefundInputSchema.shape.components,
+  attributions: moneyRefundInputSchema.shape.attributions,
 }).strict();
 export type ResumeCheckoutInput = z.infer<typeof resumeCheckoutSchema>;
 

@@ -125,8 +125,8 @@ describe("H05 atomicidad y fallos inducidos (F46)", () => {
       components: [{ method: "CARD", amountMinor: 5_000, outcome: "CONFIRMED", reference: "F46-REFUND", evidenceReference: "F46-REFUND-EV" }]
     }, op());
     const results = await Promise.allSettled([
-      refundMoney(owner, String(original.data.id), { amountMinor: 3_000, reason: "Primer refund concurrente" }, op()),
-      refundMoney(owner, String(original.data.id), { amountMinor: 3_000, reason: "Segundo refund concurrente" }, op())
+      refundMoney(owner, String(original.data.id), { amountMinor: 3_000, reason: "Primer refund concurrente", evidenceReference: "QA-F46-REFUND-RECEIPT-A" }, op()),
+      refundMoney(owner, String(original.data.id), { amountMinor: 3_000, reason: "Segundo refund concurrente", evidenceReference: "QA-F46-REFUND-RECEIPT-B" }, op())
     ]);
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     const [total] = await database.client`

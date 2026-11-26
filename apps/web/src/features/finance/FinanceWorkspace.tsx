@@ -316,6 +316,8 @@ function CheckoutPanel({ can, onChange, onError, onUnknown, dirty, token }: Pane
   const [cashAmount, setCashAmount] = useState("");
   const [cardAmount, setCardAmount] = useState("");
   const [cardOutcome, setCardOutcome] = useState<"CONFIRMED" | "UNKNOWN">("CONFIRMED");
+  const [cardReference, setCardReference] = useState("");
+  const [cardEvidence, setCardEvidence] = useState("");
   const [deliver, setDeliver] = useState(true);
 
   const load = useCallback(() => {
@@ -337,9 +339,10 @@ function CheckoutPanel({ can, onChange, onError, onUnknown, dirty, token }: Pane
   const checkout = async () => {
     const components: Array<Record<string, unknown>> = [];
     if (Number(cashAmount) > 0) components.push({ method: "CASH", amountMinor: Number(cashAmount), changeMinor: 0 });
-    if (Number(cardAmount) > 0) components.push({ method: "CARD", amountMinor: Number(cardAmount), outcome: cardOutcome });
+    if (Number(cardAmount) > 0) components.push({ method: "CARD", amountMinor: Number(cardAmount), outcome: cardOutcome,
+      reference: cardReference || undefined, evidenceReference: cardEvidence || undefined });
     if (components.length === 0) { onError(new Error("Ingresá un importe en efectivo o tarjeta.")); return; }
-    const operationId = stableOperationId(`checkout-${saleId}-${cashAmount}-${cardAmount}-${cardOutcome}`);
+    const operationId = stableOperationId(`checkout-${saleId}-${cashAmount}-${cardAmount}-${cardOutcome}-${cardReference}-${cardEvidence}`);
     try {
       const result = await financeApi.checkout({
         saleId, components, cashSessionId: cashSessionId || undefined, deliver
@@ -377,6 +380,8 @@ function CheckoutPanel({ can, onChange, onError, onUnknown, dirty, token }: Pane
         <label>Resultado tarjeta <select value={cardOutcome} onChange={(event) => { setCardOutcome(event.target.value as "CONFIRMED" | "UNKNOWN"); dirty(true); }}>
           <option value="CONFIRMED">Confirmada</option><option value="UNKNOWN">Desconocido</option>
         </select></label>
+        <label>Referencia real de terminal <input value={cardReference} onChange={(event) => { setCardReference(event.target.value); dirty(true); }} /></label>
+        <label>Evidencia de terminal <input value={cardEvidence} onChange={(event) => { setCardEvidence(event.target.value); dirty(true); }} /></label>
         <label className="check"><input type="checkbox" checked={deliver} onChange={(event) => { setDeliver(event.target.checked); dirty(true); }} /> Entregar stock ahora</label>
         <button type="button" onClick={checkout}>Ejecutar checkout</button>
       </div>}
@@ -483,6 +488,19 @@ function CorrectionsPanel({ can, onChange, onError, dirty, token }: PanelProps) 
   const [target, setTarget] = useState("");
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
+  const [evidence, setEvidence] = useState("");
+  const [cashSessionId, setCashSessionId] = useState("");
+  const [source, setSource] = useState<MoneyView | null>(null);
+  const [componentAmounts, setComponentAmounts] = useState<Record<string, string>>({});
+  const [allocationAmounts, setAllocationAmounts] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setSource(null); setComponentAmounts({}); setAllocationAmounts({});
+    if (!target) return;
+    let active = true;
+    financeApi.moneyOperation(target).then((item) => { if (active) setSource(item); }).catch(onError);
+    return () => { active = false; };
+  }, [target, token]);
 
   const load = useCallback(() => {
     financeApi.corrections().then(setCorrections).catch(() => setCorrections([]));
@@ -491,11 +509,18 @@ function CorrectionsPanel({ can, onChange, onError, dirty, token }: PanelProps) 
   useEffect(() => { load(); }, [load, token]);
 
   const refund = async () => {
-    const operationId = stableOperationId(`refund-${target}-${amount}-${reason}`);
+    const components = Object.entries(componentAmounts).filter(([, value]) => value !== "" && Number(value) !== 0)
+      .map(([originalComponentId, value]) => ({ originalComponentId, amountMinor: Number(value) }));
+    const attributions = Object.entries(allocationAmounts).filter(([, value]) => value !== "" && Number(value) !== 0)
+      .map(([key, value]) => ({ ...(key === "unallocated" ? {} : { originalAllocationId: key }), amountMinor: Number(value) }));
+    const body = { amountMinor: Number(amount), reason, evidenceReference: evidence || undefined,
+      cashSessionId: cashSessionId || undefined, components: components.length ? components : undefined,
+      attributions: attributions.length ? attributions : undefined };
+    const operationId = stableOperationId(`refund-${target}-${JSON.stringify(body)}`);
     try {
-      await financeApi.refund(target, { amountMinor: Number(amount), reason }, operationId);
+      await financeApi.refund(target, body, operationId);
       onChange("Refund registrado como operación nueva; original conservado.", operationId);
-      setAmount(""); setReason(""); load();
+      setAmount(""); setReason(""); setEvidence(""); setComponentAmounts({}); setAllocationAmounts({}); load();
     } catch (error) { onError(error, operationId); }
   };
 
@@ -505,10 +530,29 @@ function CorrectionsPanel({ can, onChange, onError, dirty, token }: PanelProps) 
       {can("money.refund") && <div className="finance-form">
         <label>Cobro original <select value={target} onChange={(event) => { setTarget(event.target.value); dirty(true); }}>
           <option value="">Elegir cobro</option>
-          {money.map((item) => <option key={item.id} value={item.id}>{formatARS(item.confirmedMinor - item.refundedMinor)} disponible</option>)}
+          {money.map((item) => <option key={item.id} value={item.id}>Cobro {item.id} · operation_id {item.operationId} · {formatARS(item.confirmedMinor - item.refundedMinor)} disponible</option>)}
         </select></label>
         <label>Importe <input inputMode="numeric" value={amount} onChange={(event) => { setAmount(event.target.value); dirty(true); }} /></label>
         <label>Motivo <input value={reason} onChange={(event) => { setReason(event.target.value); dirty(true); }} /></label>
+        <label>Evidencia del reintegro (CASH: comprobante; externo: referencia y evidencia verificables) <input value={evidence} onChange={(event) => { setEvidence(event.target.value); dirty(true); }} /></label>
+        <label>UUID de sesión de caja vigente (sólo CASH) <input value={cashSessionId} onChange={(event) => { setCashSessionId(event.target.value); dirty(true); }} /></label>
+        {source && <fieldset><legend>Orígenes canónicos — importes en unidades menores</legend>
+          <p>Parciales mixtos y destinos múltiples requieren selección explícita. No se prorratea ni cambia el medio. Los importes originales no descuentan devoluciones previas; el servidor valida remanentes.</p>
+          {source.components.map((component) => <label key={component.id}>
+            {component.method} · {component.id} · original {formatARS(component.amountMinor)}
+            <input inputMode="numeric" aria-label={`Devolver componente ${component.id}`} value={componentAmounts[component.id] ?? ""}
+              onChange={(event) => { setComponentAmounts((values) => ({ ...values, [component.id]: event.target.value })); dirty(true); }} />
+          </label>)}
+          {source.allocations.map((allocation) => <label key={allocation.id}>
+            {allocation.targetType} · destino {allocation.targetId} · asignación {allocation.id} · original {formatARS(allocation.amountMinor)}
+            <input inputMode="numeric" aria-label={`Devolver asignación ${allocation.id}`} value={allocationAmounts[allocation.id] ?? ""}
+              onChange={(event) => { setAllocationAmounts((values) => ({ ...values, [allocation.id]: event.target.value })); dirty(true); }} />
+          </label>)}
+          <label>Saldo NO asignado (explícito)
+            <input inputMode="numeric" value={allocationAmounts.unallocated ?? ""}
+              onChange={(event) => { setAllocationAmounts((values) => ({ ...values, unallocated: event.target.value })); dirty(true); }} />
+          </label>
+        </fieldset>}
         <button type="button" onClick={refund}>Registrar refund</button>
       </div>}
       <div className="finance-list">

@@ -172,7 +172,7 @@ describe("H05 Money y Recovery (F08–F19, F36, F40, F41)", () => {
     await closeCashSession(owner, historical.cashSessionId, { countedAmountMinor: 17_000, expectedRevision: Number(session!.revision) }, op());
     const current = await openCash(owner);
     const refund = await refundMoney(owner, String(charge.data.id), {
-      amountMinor: 2_000, reason: "Devolución autorizada", cashSessionId: current.cashSessionId
+      amountMinor: 2_000, reason: "Devolución autorizada", cashSessionId: current.cashSessionId, evidenceReference: "QA-RECIBO-REINTEGRO-EFECTIVO-F19"
     }, op());
     expect(refund.data.id).not.toBe(charge.data.id);
     const closed = await database.client`select status::text status from cash.cash_sessions where id = ${historical.cashSessionId}`;
